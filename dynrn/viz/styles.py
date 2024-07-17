@@ -19,6 +19,7 @@ class mph_colors(nb.colorset):
     ch0 = dictpal('ch:start=.2,rot=.3,light=.7')
     ch1 = dictpal('ch:start=.1,rot=-.1,light=.6')
     C = ['C0', 'C2', 'C3', 'C4']
+nb.color_sets['dynrn'] = mph_colors
 
 
 
@@ -55,8 +56,28 @@ def init_rc():
         'lines.color': 'k',
     })
 
-def init_plt(plot_dir, **kws):
+def init_plt(plot_dir, style="dynrn", **kws):
     _colors, plotter = nb.init_plt(plot_dir, "default", **kws)
+    nb.colorset.active = mph_colors
     sns.set_context('paper')
     init_rc()
     return mph_colors, plotter
+
+
+def default(colors):
+    if colors is None:
+        return nb.colorset.active
+    else:
+        return colors
+    
+
+def getc(spec):
+    try:
+        from cmap import Colormap, Color
+        try:
+            return Color(spec)
+        except ValueError as e:
+            cm = Colormap(':'.join(spec.split(':')[:-1]))
+            return cm(int(spec.split(':')[-1]))
+    except ImportError:
+        return spec

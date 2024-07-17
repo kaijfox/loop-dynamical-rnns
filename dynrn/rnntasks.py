@@ -1,9 +1,19 @@
 import numpy as np
 
+
 class SimpleTasks:
 
     @staticmethod
-    def fixed_interval(interval, iti_halflife=5, iti_min = 3, session_length=30, n_dim = 2, n_sessions = 2, seed = 0, states = False):
+    def fixed_interval(
+        interval,
+        iti_halflife=5,
+        iti_min=3,
+        session_length=30,
+        n_dim=2,
+        n_sessions=2,
+        seed=0,
+        states=False,
+    ):
         """
         Targets as replicas of one-hot inputs delayed by a fixed interval
 
@@ -40,13 +50,13 @@ class SimpleTasks:
             - (iti_min) + (i * (interval + 1)) + (1 to interval): Interval
             countdown i
             - (iti_min) + (i * (interval + 1)) + (interval + 1): Reward i
-            
-            
+
+
         """
         inputs = np.zeros((n_sessions, session_length, n_dim))
         targets = np.zeros((n_sessions, session_length, n_dim))
         if states:
-            states_ = np.zeros((n_sessions, session_length), dtype = int)
+            states_ = np.zeros((n_sessions, session_length), dtype=int)
         rng = np.random.default_rng(seed)
 
         for i in range(n_sessions):
@@ -63,13 +73,15 @@ class SimpleTasks:
                 targets[i, next_x + interval, ix] = 1
                 if states:
                     ix_ofs = iti_min + ix * (interval + 1)
-                    states_[i, x + 1 : x + iti_min] = np.arange(iti_min-1) + 1
+                    states_[i, x + 1 : x + iti_min] = np.arange(iti_min - 1) + 1
                     states_[i, x + iti_min : next_x] = 0
                     states_[i, next_x] = ix_ofs
-                    states_[i, next_x : next_x + interval] = np.arange(interval) + ix_ofs
+                    states_[i, next_x : next_x + interval] = (
+                        np.arange(interval) + ix_ofs
+                    )
                     states_[i, next_x + interval] = ix_ofs + interval
                 x = next_x + interval
-        
+
         # convert integer states to one-hot and return
         if states:
             nstates = iti_min + n_dim * (interval + 2)
@@ -78,13 +90,25 @@ class SimpleTasks:
                 states[i, np.arange(session_length), states_[i]] = 1
             return inputs, targets, states
         return inputs, targets
-        
+
     @staticmethod
-    def cdfi(interval, flip_halflife = 12, flip_min = 5, iti_halflife = 5, iti_min = 1, session_length = 30, n_dim = 2, n_sessions = 2, seed = 0):
+    def cdfi(
+        interval,
+        flip_halflife=12,
+        flip_min=5,
+        iti_halflife=5,
+        iti_min=1,
+        session_length=30,
+        n_dim=2,
+        n_sessions=2,
+        seed=0,
+    ):
         """
         Fixed interval task with a context switch
         """
-        inp, tgt = SimpleTasks.fixed_interval(interval, iti_halflife, iti_min, session_length, n_dim, n_sessions, seed)
+        inp, tgt = SimpleTasks.fixed_interval(
+            interval, iti_halflife, iti_min, session_length, n_dim, n_sessions, seed
+        )
         rng = np.random.default_rng(seed + 1)
         context = np.zeros((n_sessions, session_length, n_dim))
         for i in range(n_sessions):
@@ -98,14 +122,14 @@ class SimpleTasks:
                 if next_x >= session_length:
                     context[i, x:, ix] = 1
                     break
-                context[i, x : next_x, ix] = 1
+                context[i, x:next_x, ix] = 1
                 x = next_x
         tgt = tgt * context
-        inp = np.concatenate([inp, context], axis = -1)
+        inp = np.concatenate([inp, context], axis=-1)
         return inp, tgt
-    
+
     @staticmethod
-    def ohflip(halflife, tmin, ndim = 2, session_length = 30, n_sessions = 2, seed = 0):
+    def ohflip(halflife, tmin, ndim=2, session_length=30, n_sessions=2, seed=0):
         """
         One-hot flip task.
 
@@ -155,5 +179,99 @@ class SimpleTasks:
                 inp[i, x, ix] = 1
                 tgt[i, x:, :] = 0
                 tgt[i, x:, ix] = 1
-        
+
         return inp, tgt
+
+
+class ExpMin:
+    def __init__(self, halflife, min):
+        self.halflife = halflife
+        self.min = min
+
+    def __call__(self, rng):
+        return int(rng.exponential(self.halflife) + self.min)
+    
+class Uniform:
+    def __init__(self, min, max):
+        self.min = min
+        self.max = max
+        
+    def __call__(self, rng):
+        return rng.uniform(self.min, self.max)
+
+
+class DriscollTasks:
+
+    @staticmethod
+    def memorypro(
+        iti=ExpMin(6, 4),
+        context=ExpMin(5, 2),
+        stim=ExpMin(2, 1),
+        memory=ExpMin(6, 4),
+        response=ExpMin(5, 2),
+        magnitude=Uniform(0.5, 1),
+        angle=Uniform(0, np.pi / 2),
+        session_length=30,
+        n_sessions=2,
+        seed=0,
+    ):
+        """
+        Memory pro task from Driscoll et al 2022
+
+        Parameters
+        ----------
+        interval : float
+            The time interval between stimuli presentation in seconds.
+        iti_halflife : float
+            The half-life of the exponential distribution used to generate the
+            inter-trial intervals (ITIs) in seconds.
+        iti_min : float, optional
+            The minimum ITI duration in seconds. Default is 3.
+        session_length : int, optional
+            The duration of each session in minutes. Default is 30.
+        n_sessions : int, optional
+            The number of sessions to run. Default is 2.
+        seed : int, optional
+            The random seed for reproducibility. Default is 0.
+
+        Returns
+        -------
+        inputs : array (n_sessions, session_length, 3)
+            The input stimuli for each session, with the last dimension indexed
+            as [fixation, response, stimulus_cos, stimulus_sin]
+        targets : array (n_sessions, session_length, 3)
+            The target stimuli for each session, with the last dimension indexed
+            as [response_cos, response_sin]
+        period : array (n_sessions, session_length)
+            The period in a trial of each timepoint, with integers 0 to 4
+            indicating [iti, context, stim, memory, response], respectively.
+        """
+        inputs = np.zeros((n_sessions, session_length, 4))
+        targets = np.zeros((n_sessions, session_length, 2))
+        periods = np.zeros((n_sessions, session_length))
+        rng = np.random.default_rng(seed)
+
+        for i in range(n_sessions):
+            t = 0
+            while True:
+                times = t + np.cumsum(
+                    [0, iti(rng), context(rng), stim(rng), memory(rng), response(rng)]
+                )
+                if times[-1] >= session_length:
+                    break
+
+                theta = angle(rng)
+                A = magnitude(rng)
+
+                inputs[i, times[1] : times[4], 0] = 1
+                inputs[i, times[2] : times[3], 2] = A * np.cos(theta)
+                inputs[i, times[2] : times[3], 3] = A * np.sin(theta)
+                inputs[i, times[4] : times[5], 1] = 1
+                targets[i, times[4] : times[5], 0] = A * np.cos(theta)
+                targets[i, times[4] : times[5], 1] = A * np.sin(theta)
+                for j in range(5):
+                    periods[i, times[j] : times[j + 1]] = j
+                
+                t = times[5]
+
+        return inputs, targets, periods
