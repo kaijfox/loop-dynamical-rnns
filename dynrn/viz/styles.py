@@ -1,4 +1,4 @@
-from . import nb
+from mplutil import nb
 import seaborn as sns
 import matplotlib as mpl
 import numpy as np
@@ -26,7 +26,7 @@ nb.color_sets['dynrn'] = mph_colors
 def init_rc():
     mpl.rcParams.update({
         # font/text
-        'font.family': 'Arial',
+        'font.family': 'sans-serif',
         'font.size': 10,
         'axes.labelsize': 8,
         'xtick.labelsize': 8,

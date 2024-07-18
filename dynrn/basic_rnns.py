@@ -3,7 +3,7 @@ import numpy as np
 from torch import optim
 from torch import nn
 from dynrn.rnntasks import SimpleTasks
-from dynrn.viz import util as vu
+from mplutil import util as vu
 import matplotlib.pyplot as plt
 from pathlib import Path
 import tqdm
@@ -104,8 +104,8 @@ class DynamicalRNN(nn.Module):
             hs.append(h)
         return th.stack(y, dim=1), th.stack(hs, dim=1)
 
-    def init_hidden(self, batch_size):
-        return th.zeros(batch_size, self.nh)
+    def init_hidden(self, batch_size, device = None):
+        return th.zeros(batch_size, self.nh, device=device)
 
     def init_weights(self):
         pass
@@ -175,8 +175,7 @@ class BasicRNN(NegRNN):
 
 ### ------------------------------------------------- Fitting and plotting ----
 
-
-def fit_rnn(rnn, x, y, opt, loss_fn=nn.MSELoss(), n_steps=2000):
+def fit_rnn(rnn, x, y, opt, loss_fn=nn.MSELoss(), n_steps=2000, return_h = True):
     """
     Fit an RNN to batched sequences.
 
@@ -202,18 +201,23 @@ def fit_rnn(rnn, x, y, opt, loss_fn=nn.MSELoss(), n_steps=2000):
     yhats = []
     h_hist = []
 
+    h_init = rnn.init_hidden(x.shape[0], device = x.device)
     for i in tqdm.trange(n_steps):
         opt.zero_grad()
-        h_init = rnn.init_hidden(x.shape[0])
         yhat, hs = rnn.seq_forward(x, h_init)
         loss = loss_fn(yhat, y)
         loss.backward()
         opt.step()
-        losses.append(loss.detach().numpy())
-        yhats.append(yhat.detach().numpy())
-        h_hist.append(hs.detach().numpy())
+        losses.append(loss.detach().cpu().numpy())
+        yhats.append(yhat.detach().cpu().numpy())
+        if return_h:
+            h_hist.append(hs.detach().cpu().numpy())
 
-    return np.stack(losses), np.stack(yhats), h_hist
+    if return_h:
+        return np.stack(losses), np.stack(yhats), h_hist
+    else:
+        return np.stack(losses), np.stack(yhats)
+
 
 
 def plot_rnn_training(
@@ -228,7 +232,7 @@ def plot_rnn_training(
     buf = col_buffer * skip
     pal = colors.ch0(np.arange(start - buf, len(losses) + buf, skip))
     for i in range(x.shape[-1]):
-        ax[i + 1].plot(x.numpy()[session, :, i], color=colors.subtle)
+        ax[i + 1].plot(x.numpy()[session, :, i], color=colors.subtle, zorder = 2)
         for j in range(start, len(losses), skip):
             ax[0].plot([j], [losses[j]], "o", ms=3, color=pal[j])
             ax[i + 1].plot(yhats[j, session, :, i], color=pal[j])
