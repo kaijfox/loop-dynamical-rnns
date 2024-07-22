@@ -217,7 +217,7 @@ def fit_rnn(rnn, x, y, opt, loss_fn=nn.MSELoss(), n_steps=2000):
 
 
 def plot_rnn_training(
-    losses, yhats, x, start=0, colors=None, n_iter=5, session=0, col_buffer=3
+    losses, yhats, x, start=0, colors=None, n_iter=5, session=0, col_buffer=3,
 ):
     skip = len(losses) // n_iter
     colors = styles.default(colors)
