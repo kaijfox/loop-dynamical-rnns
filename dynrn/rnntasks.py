@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.stats
 
 
 class SimpleTasks:
@@ -183,34 +184,33 @@ class SimpleTasks:
         return inp, tgt
 
 
-class ExpMin:
-    def __init__(self, halflife, min):
-        self.halflife = halflife
-        self.min = min
+class itiexp(scipy.stats.rv_continuous):
 
-    def __call__(self, rng):
-        return int(rng.exponential(self.halflife) + self.min)
-    
-class Uniform:
-    def __init__(self, min, max):
-        self.min = min
-        self.max = max
-        
-    def __call__(self, rng):
-        return rng.uniform(self.min, self.max)
+    def __init__(self, halflife, tmin):
+        super().__init__()
+        self.exp = scipy.stats.expon(scale=halflife / np.log(2))
+        self.tmin = tmin
+
+    def _pdf(self, x, *a, **kw):
+        return self.exp.pdf(x - self.tmin, *a, **kw)
+
+    def _rvs(self, *a, **kw):
+        return self.exp.rvs(*a, **kw) + self.tmin
 
 
 class DriscollTasks:
 
     @staticmethod
     def memorypro(
-        iti=ExpMin(6, 4),
-        context=ExpMin(5, 2),
-        stim=ExpMin(2, 1),
-        memory=ExpMin(6, 4),
-        response=ExpMin(5, 2),
-        magnitude=Uniform(0.5, 1),
-        angle=Uniform(0, np.pi / 2),
+        iti=itiexp(6, 4),
+        context=itiexp(5, 2),
+        stim=itiexp(2, 1),
+        memory=itiexp(6, 4),
+        response=itiexp(5, 2),
+        magnitude=scipy.stats.uniform(0.5, 1),
+        angle=scipy.stats.uniform(0, np.pi / 2),
+        angle_noise=scipy.stats.norm(0, 0.0),
+        flag_noise=scipy.stats.norm(0, 0.1),
         session_length=30,
         n_sessions=2,
         seed=0,
@@ -255,23 +255,35 @@ class DriscollTasks:
             t = 0
             while True:
                 times = t + np.cumsum(
-                    [0, iti(rng), context(rng), stim(rng), memory(rng), response(rng)]
+                    [
+                        0,
+                        iti.rvs(random_state=rng).astype('int'),
+                        context.rvs(random_state=rng).astype('int'),
+                        stim.rvs(random_state=rng).astype('int'),
+                        memory.rvs(random_state=rng).astype('int'),
+                        response.rvs(random_state=rng).astype('int'),
+                    ]
                 )
                 if times[-1] >= session_length:
                     break
 
-                theta = angle(rng)
-                A = magnitude(rng)
+                theta = angle.rvs(random_state=rng)
+                A = magnitude.rvs(random_state=rng)
 
                 inputs[i, times[1] : times[4], 0] = 1
-                inputs[i, times[2] : times[3], 2] = A * np.cos(theta)
-                inputs[i, times[2] : times[3], 3] = A * np.sin(theta)
+                theta_noise = angle_noise.rvs(size=(2, times[3] - times[2]))
+                inputs[i, times[2] : times[3], 2] = A * np.cos(theta + theta_noise[0])
+                inputs[i, times[2] : times[3], 3] = A * np.sin(theta + theta_noise[1])
                 inputs[i, times[4] : times[5], 1] = 1
-                targets[i, times[4] : times[5], 0] = A * np.cos(theta)
-                targets[i, times[4] : times[5], 1] = A * np.sin(theta)
+                theta_noise = angle_noise.rvs(size=(2, times[5] - times[4]))
+                targets[i, times[4] : times[5], 0] = np.cos(theta + theta_noise[0])
+                targets[i, times[4] : times[5], 1] = np.sin(theta + theta_noise[1])
                 for j in range(5):
                     periods[i, times[j] : times[j + 1]] = j
-                
+
                 t = times[5]
+
+            inputs[i, :, 0] += flag_noise.rvs(size=(session_length,))
+            inputs[i, :, 1] += flag_noise.rvs(size=(session_length,))
 
         return inputs, targets, periods
