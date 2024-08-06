@@ -1,12 +1,10 @@
 import torch as th
 from torch import jit
 import numpy as np
-from torch import optim
 import joblib as jl
 import copy
+import glob
 from torch import nn
-from dynrn.rnntasks import SimpleTasks
-from mplutil import util as vu
 import matplotlib.pyplot as plt
 import time
 from datetime import datetime
@@ -370,9 +368,9 @@ def plot_rnn_training(
     ax[0].plot(losses, color=colors.subtle)
 
     buf = col_buffer * skip
-    pal = colors.ch0(np.arange(start - buf, len(losses) + buf, skip))
     if epochs is None:
         epochs = range(start, len(losses), skip)
+    pal = colors.ch0(epochs)
     for i in range(x.shape[-1]):
         ax[i + 1].plot(x.numpy()[session, :, i], color=colors.subtle, zorder=2)
         for ep in epochs:
@@ -386,10 +384,67 @@ def plot_rnn_training(
     return ret
 
 
-def model_hash(prefix):
-    if len(prefix):
-        prefix += "_"
-    return f"{prefix}{hex(int(time.time()) // 60)[-5:]}.{datetime.now().strftime('%m%d%H%M')}"
+def timehash(unique_within=False, ext=".*", max_suffix=1000):
+    """
+    Parameters
+    ----------
+    unique_within, bool or str:
+        If a string, the hash will be postfixed with a unique identifier if
+        there is another file with the same hash.
+    """
+    hextime = str(hex(int(datetime.now().strftime("%m%d%H%M")))).lstrip("0x")
+    # suffix with hex codes to ensure unique filenames
+    if unique_within:
+        i = 0
+        unique_hextime = hextime
+        while (
+            find_hash(unique_within, unique_hextime, ext=ext, silent=True) is not None
+            and i < max_suffix
+        ):
+            unique_hextime = f"{hextime}.{str(hex(i)).lstrip('0x')}"
+            i += 1
+        if i > max_suffix - 1:
+            raise ValueError(
+                "Could not find unique hash within "
+                f"{max_suffix} attempts. Last attempt was {unique_hextime}"
+            )
+        hextime = unique_hextime
+    return hextime
+
+
+def find_hash(root, hash, ext=".*", silent=False):
+    pattern = str(Path(root) / f"**/*_{hash}{ext}")
+    results = list(glob.glob(pattern, recursive=True))
+    if not len(results):
+        if silent:
+            return None
+        raise ValueError(f"No maches for: {pattern}")
+    return results[0]
+
+
+def hash_or_path(path_str, ext=".*", sep=":"):
+    """
+    Resolve <root><sep><hash> or <path> format to filepath.
+
+    Parameters
+    ----------
+    path_str : str
+        The path spec string, either of format <root><sep><hash> or <path>.
+    ext : str
+        The extension to append to the hash in searching.
+    sep : str
+        The separator between the root and hash in the path spec string.
+    """
+    if sep in path_str:
+        try:
+            root, hash = path_str.split(":")
+        except:
+            raise ValueError(
+                f"Path spec {path_str} contained separator but"
+                " did not match pattern <root>{sep}<hash>"
+            )
+        return find_hash(root, hash, ext), hash
+    return path_str, None
 
 
 def save_rnn(model_path, model, x, y, losses, yhats, meta={}):

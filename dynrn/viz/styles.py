@@ -26,13 +26,14 @@ nb.color_sets['dynrn'] = mph_colors
 def init_rc():
     mpl.rcParams.update({
         # font/text
-        'font.family': 'sans-serif',
+        'font.family': 'Arial, sans-serif',
         'font.size': 10,
         'axes.labelsize': 8,
         'xtick.labelsize': 8,
         'ytick.labelsize': 8,
         'axes.titlesize': 9,
         'legend.fontsize': 8,
+        'figure.titlesize': 10,
         # axes
         'axes.facecolor': 'ffffff00',
         'axes.spines.top': False,
