@@ -32,41 +32,25 @@ Train args:
 - `lr`: float, default 1e-3, learning rate
 - `steps`: int, default 601, number of training steps
 - `checkpt`: int, default 100, checkpoint every n steps
+- `n`: int, default 1, number of networks to train
     
 
 """
 
 import torch as th
 import torch.jit as jit
-import copy
-import numpy as np
-import dill
 from collections import namedtuple
 from torch import optim
 from torch import nn
-from dynrn.rnntasks import DriscollTasks, itiexp
 from dynrn.predictors import (
-    activity_dataset,
     save_dsn,
-    load_dsn,
-    create_memorypro_activity_dataset,
     fit_dsn,
-    td_loss,
 )
 import dynrn.basic_rnns as rnns
 from dynrn.basic_rnns import timehash, hash_or_path
-import scipy.stats
 from scipy.stats import uniform, norm
-from datetime import datetime
-from mplutil import util as vu
-import matplotlib.pyplot as plt
 from pathlib import Path
-from sklearn.decomposition import PCA
-import tqdm
-import os
 import joblib as jl
-import time
-import seaborn as sns
 import sys
 
 # cuda setup
@@ -88,6 +72,7 @@ train_args = {
         lr=1e-3,
         steps=601,
         checkpt=100,
+        n=1,
     ),
     **eval(f"dict({sys.argv[8]})"),
 }
@@ -103,7 +88,7 @@ if network_type == "softplus":
         raise ValueError(
             f"`widths` network argument must" " be a list of length 2, got {widths}"
         )
-    layers = lambda: (
+    create_model = lambda: nn.Sequential(
         nn.Linear(data.train.n_act, bottleneck),
         nn.Linear(bottleneck, widths[0]),
         nn.Softplus(),
@@ -112,42 +97,42 @@ if network_type == "softplus":
         nn.Softplus(),
         nn.Linear(widths[1], data.train.n_act),
     )
-    th.manual_seed(0)
-    predictor = jit.script(nn.Sequential(*layers()))
 
+for i_net in range(train_args["n"]):
+    
+    # -------- Training setup
+    th.manual_seed(i_net)
+    predictor = jit.script(create_model())
 
-# -------- Training setup
-cumulant_fn = lambda d: d.activity[:, 1:]
+    cumulant_fn = lambda d: d.activity[:, 1:]
+    x = data.train.activity
+    y = cumulant_fn(data.train)
 
-x = data.train.activity
-y = cumulant_fn(data.train)
+    predictor.to(device)
+    opt = optim.Adam(predictor.parameters(), lr=train_args["lr"])
 
-predictor.to(device)
-opt = optim.Adam(predictor.parameters(), lr=train_args["lr"])
+    # -------- Train
+    _losses, _ckpts = fit_dsn(
+        predictor,
+        x.to(device),
+        y.to(device),
+        opt,
+        gamma=gamma,
+        n_steps=train_args["steps"],
+        loss_fn=nn.MSELoss(),
+        checkpoint_every=train_args["checkpt"],
+    )
 
-# -------- Train
-_losses, _ckpts = fit_dsn(
-    predictor,
-    x.to(device),
-    y.to(device),
-    opt,
-    gamma=gamma,
-    n_steps=train_args["steps"],
-    loss_fn=nn.MSELoss(),
-    checkpoint_every=train_args["checkpt"],
-)
-
-
-# -------- Save
-dsn_hash = timehash(unique_within=dsn_root)
-dsn_path = dsn_root / dsn_path_fmt.format(hash=dsn_hash)
-save_dsn(
-    dsn_path,
-    predictor,
-    data,
-    gamma=gamma,
-    cumulant_fn=cumulant_fn,
-    checkpoints=_ckpts,
-    losses=_losses,
-)
-print(f"Saved DSN model: {dsn_path}")
+    # -------- Save
+    dsn_hash = timehash(unique_within=dsn_root)
+    dsn_path = dsn_root / dsn_path_fmt.format(hash=dsn_hash)
+    save_dsn(
+        dsn_path,
+        predictor,
+        data,
+        gamma=gamma,
+        cumulant_fn=cumulant_fn,
+        checkpoints=_ckpts,
+        losses=_losses,
+    )
+    print(f"Saved DSN model: {dsn_path}")
