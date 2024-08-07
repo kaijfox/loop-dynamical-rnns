@@ -171,17 +171,21 @@ def __(cosine_dist, mlp, np, pcs, scipy):
     # calculate alignment of each PC with non-null (aka row) space of weight matrix
     _weights = list(mlp.children())[0].weight.detach()
 
-    # projection onto row space (n_hidden x n_hidden), rank n_reduced
-    _proj = _weights.T @ scipy.linalg.pinv(_weights.T)
-    _components = pcs.components_.T
-    # project the components (n_hidden x n_components)
-    _projected = _proj @ _components
-    # cosine of each compone to projection onto row space
-    component_weight_dists = np.array([
-        1 - cosine_dist(_projected[:, i_comp], pcs.components_[i_comp])
-        for i_comp in range(pcs.components_.shape[1])
-    ])
-    return component_weight_dists,
+    def component_weights_onto_subspace(subspace_rows, components):
+        # projection onto row space (n_hidden x n_hidden), rank n_reduced
+        _proj = _weights.T @ scipy.linalg.pinv(_weights.T)
+        _components = pcs.components_.T
+        # project the components (n_hidden x n_components)
+        _projected = _proj @ _components
+        # cosine of each compone to projection onto row space
+        return np.array([
+            1 - cosine_dist(_projected[:, i_comp], pcs.components_[i_comp])
+            for i_comp in range(pcs.components_.shape[1])
+        ])
+
+    component_weight_dists = component_weights_onto_subspace(_weights, pcs.components_)
+
+    return component_weight_dists, component_weights_onto_subspace
 
 
 @app.cell
@@ -191,6 +195,30 @@ def __(component_weight_dists, dsn_hash, plotter, plt):
     _ax.set_ylabel("Cos. to learned subspace")
     _ax.set_xlabel("PC")
     plotter.finalize(_fig, f"cos-to-proj_{dsn_hash}")
+    _fig
+    return
+
+
+@app.cell
+def __(
+    component_weights_onto_subspace,
+    dill,
+    find_hash,
+    pcs,
+    plotter,
+    plt,
+    root_dir,
+):
+    _fig, _ax = plt.subplots(figsize = (2, 2))
+    for _hash in ['7b017e', '7b01e2', '7b01e2.0']:
+        _res_path = find_hash(root_dir / 'intermediates/bottleneck', _hash, '.dil')
+        _weights = dill.load(open(_res_path, 'rb'))['proj_weights']
+        print(_res_path)
+        _dists = component_weights_onto_subspace(_weights, pcs.components_)
+        _ax.plot(_dists[:80])
+    _ax.set_ylabel("Cos. to learned subspace")
+    _ax.set_xlabel("PC")
+    plotter.finalize(_fig, f"cos-to-proj_b40")
     _fig
     return
 
