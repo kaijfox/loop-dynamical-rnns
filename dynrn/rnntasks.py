@@ -1,12 +1,15 @@
 import numpy as np
 import scipy.stats
+from scipy.stats import rv_continuous as rvc
 import torch as th
 from mplutil import util as vu
 import pandas as pd
 from collections import defaultdict
 from cmap import Colormap
+from typing import TypedDict, Union, List
 
 from .viz.styles import getc
+
 
 class SimpleTasks:
 
@@ -190,7 +193,7 @@ class SimpleTasks:
         return inp, tgt
 
 
-class itiexp(scipy.stats.rv_continuous):
+class itiexp(rvc):
 
     def __init__(self, halflife, tmin):
         super().__init__()
@@ -294,12 +297,504 @@ class DriscollTasks:
 
         return inputs, targets, periods
 
+    class TrialInfo(TypedDict):
+        """
+        Properties:
+        duration : int
+            Total duration of the trial.
+        durations : list[int], length n_period
+            Durations of each period in the trial.
+        angles : dict[str, float]
+            Generated values for each angle in the task.
+        amplitudes : dict[str, float]
+            Generated amplitudes for each angle in the task.
+        directions : dict[str, np.ndarray, shape (2,)]
+            Generated direction vectors for each angle in the task (cos, sin).
+        points : dict[str, np.ndarray, shape (2,)]
+            Generated points for each angle in the task scaled by amplitude.
+        noisy_*: dict[str, *]
+            Versions of the above properties with noise added.
+        slices : list[slice]
+            Time-dimension slices for each period in the trial.
+        abs_slices : list[slice]
+            Session-wise time-dimension slices for each period in the trial.
+        start : int
+            The timepoint at which the trial starts in the session.
+        """
+
+        duration: int
+        durations: list
+        angles: dict[str, float]
+        norms: dict[str, float]
+        directions: dict[str, np.ndarray]
+        points: dict[str, np.ndarray]
+        noisy_angles: dict[str, float]
+        noisy_norms: dict[str, float]
+        noisy_directions: dict[str, np.ndarray]
+        noisy_points: dict[str, np.ndarray]
+
+    class TrialMeta(TrialInfo):
+        slice_: slice
+        slices: list[slice]
+        abs_slices: list[slice]
+        start: int
+
+    class DriscollTask:
+        """
+        Properties:
+        n_stim : int
+            The number (dimension) of input stimuli.
+        n_tgt : int
+            The number (dimension) of targets.
+        n_period : int
+            The number of periods in a trial.
+        periods : list[str]
+            The names of the periods in a trial.
+        angles : list
+            The names of the angles to be generated for each trial.
+        flag_ixs : list
+            The indices of the stimuli dimensions that are context flags rather
+            than genuine stimuli.
+        stim_names : list
+            The names of the stimulus dimensions.
+        tgt_names : list
+            The names of the target dimensions.
+        stim_groups : list[list[int]]
+            A list of lists of indices of the stimulus dimensions grouped by how
+            they should appear when displayed.
+        tgt_groups : list[list[int]]
+            A list of lists of indices of the target dimensions grouped by how
+            they should appear when displayed.
+        xcolors : list[array, shape (3 or 4,)], length n_stim
+            The colors to use for each stimulus dimension.
+        ycolors : list[array, shape (3 or 4,)], length n_tgt
+            The colors to use for each target dimension.
+        iti_stim : list[int]
+            The value to hold in the stimuli during the final iti of a session.
+        default_params : dict
+            Default parameters for the task, containing a distribution for each
+            - for period name
+            - for each angle name, as well as `<angle>_norm`, `<angle>_noise`,
+            and `<angle>_norm_noise`
+            - `stim_noise` a list of distributions for each stimulus dimension,
+            or a single distribution for all dimensions
+            - `target_noise` a list of distributions for each stimulus
+        """
+
+        n_stim: int
+        n_tgt: int
+        n_period: int
+        periods: list[str]
+        angles: list
+        flag_ixs: list
+        stim_names: list
+        tgt_names: list
+        stim_groups: list[list[int]]
+        tgt_groups: list[list[int]]
+        xcolors: list
+        ycolors: list
+        iti_stim: list
+        default_params: dict[str, Union[rvc, list[rvc]]]
+
+        @classmethod
+        def generate(self, trial_info: "DriscollTasks.TrialInfo") -> tuple:
+            """
+            Generate a trial for the task.
+
+            Parameters:
+            trial_info : dict
+                A dictionary containing metadata for the trial.
+
+            Returns:
+            inputs : np.ndarray, shape (trial_info.duration, n_stim)
+                The input stimuli for the trial.
+            targets : np.ndarray, shape (trial_info.duration, n_tgt)
+                The target stimuli for the trial.
+            periods : np.ndarray, shape (trial_info.duration)
+                The period index for each timepoint.
+            """
+            pass
+
+    @staticmethod
+    def generate_sessions(
+        task: DriscollTask,
+        n_sessions: int,
+        session_length: int,
+        params: dict = {},
+        seed: int = 0,
+    ):
+        params = {**task.default_params, **params}
+        stimuli = np.zeros((n_sessions, session_length, task.n_stim))
+        targets = np.zeros((n_sessions, session_length, task.n_tgt))
+        periods = np.zeros((n_sessions, session_length))
+        trials = [[] for _ in range(n_sessions)]
+        rng = np.random.default_rng(seed)
+
+        for i in range(n_sessions):
+            t = 0
+            while True:
+                trial_info = DriscollTasks._generate_trial_info(task, params, rng)
+                dur = trial_info["duration"]
+                if t + dur >= session_length:
+                    break
+
+                stm, tgt, prd = task.generate(trial_info)
+                stm, tgt = DriscollTasks._add_trial_noise(stm, tgt, params, rng)
+                stimuli[i, t : t + dur] = stm
+                targets[i, t : t + dur] = tgt
+                periods[i, t : t + dur] = prd
+
+                trials[i].append(DriscollTasks._add_metadata(trial_info, t))
+                t += dur
+
+            stm = np.full((session_length - t, task.n_stim), task.iti_stim).astype(
+                "float"
+            )
+            tgt = np.zeros((session_length - t, task.n_tgt))
+            stm, tgt = DriscollTasks._add_trial_noise(stm, tgt, params, rng)
+            stimuli[i, t:] = stm
+            targets[i, t:] = tgt
+            periods[i, t:] = 0
+
+        return stimuli, targets, periods, trials
+
+    @staticmethod
+    def _generate_trial_info(
+        task: DriscollTask,
+        params: dict[str, rvc],
+        rng: np.random.Generator,
+    ):
+        """
+        Generate metadata for a trial of the task.
+
+        Parameters:
+        task : DriscollTask
+            The task to generate metadata for.
+        params : dict[str, rvc | list[rvc]]
+            The parameters for the task.
+        rng : np.random.Generator
+            The random number generator to use for sampling
+
+        Returns:
+        trial_info : dict
+            A dictionary containing metadata for the trial.
+        """
+        rngk = dict(random_state=rng)
+
+        # sample durations, angles and norms
+        durations = [params[p].rvs(**rngk).astype("int") for p in task.periods]
+        duration = sum(durations)
+        angles = {a: params[a].rvs(**rngk) for a in task.angles}
+        norms = {a: params[f"{a}_norm"].rvs(**rngk) for a in task.angles}
+
+        # add noise to angles and norms
+        noisy_angles = {
+            a: angles[a] + params[f"{a}_noise"].rvs(**rngk) for a in task.angles
+        }
+        noisy_norms = {
+            a: norms[a] + params[f"{a}_norm_noise"].rvs(**rngk) for a in task.angles
+        }
+
+        # calculate direction vectors and points
+        directions = {
+            a: np.array([np.cos(angles[a]), np.sin(angles[a])]) for a in task.angles
+        }
+        points = {a: norms[a] * directions[a] for a in task.angles}
+        noisy_directions = {
+            a: np.array([np.cos(noisy_angles[a]), np.sin(noisy_angles[a])])
+            for a in task.angles
+        }
+        noisy_points = {a: noisy_norms[a] * noisy_directions[a] for a in task.angles}
+
+        return DriscollTasks.TrialInfo(
+            duration=duration,
+            durations=durations,
+            angles=angles,
+            norms=norms,
+            directions=directions,
+            points=points,
+            noisy_angles=noisy_angles,
+            noisy_norms=noisy_norms,
+            noisy_directions=noisy_directions,
+            noisy_points=noisy_points,
+        )
+
+    def _add_metadata(trial_info: TrialInfo, start: int):
+        """
+        Add metadata to a trial_info dict.
+
+        Parameters:
+        trial_info : dict
+            A dictionary containing metadata for the trial.
+        start : int
+            The timepoint at which the trial starts in the session.
+
+        Returns:
+        trial_meta : dict
+            A dictionary containing metadata for the trial.
+        """
+        t = 0
+        slices = []
+        abs_slices = []
+        for d in trial_info["durations"]:
+            slices.append(slice(t, t + d))
+            abs_slices.append(slice(start + t, start + t + d))
+            t += d
+        return DriscollTasks.TrialMeta(
+            **trial_info,
+            slice_=slice(start, start + trial_info["duration"]),
+            slices=slices,
+            abs_slices=abs_slices,
+            start=start,
+        )
+
+    @staticmethod
+    def _add_trial_noise(inputs, targets, params, rng):
+        """
+        Add noise to input and target stimuli.
+
+        Parameters:
+        inputs : np.ndarray, shape (duration, n_stim)
+            The input stimuli for the trial.
+        targets : np.ndarray, shape (duration, n_tgt)
+            The target stimuli for the trial.
+        params : dict
+            The parameters for the task.
+        rng : np.random.Generator
+            The random number generator to use for sampling
+
+        Returns:
+        inputs : np.ndarray, shape (duration, n_stim)
+            The input stimuli for the trial with noise added.
+        targets : np.ndarray, shape (duration, n_tgt)
+            The target stimuli for the trial with noise added.
+        """
+        # allow stim/target noise to be a single distribution or a list
+        stim_noise = params["stim_noise"]
+        if not isinstance(stim_noise, list):
+            stim_noise = [stim_noise] * inputs.shape[-1]
+        target_noise = params["target_noise"]
+        if not isinstance(target_noise, list):
+            target_noise = [target_noise] * targets.shape[-1]
+        # sample and add noise to inputs and targets
+        inputs += np.array(
+            [n.rvs(size=inputs.shape[0], random_state=rng) for n in stim_noise]
+        ).T
+        targets += np.array(
+            [n.rvs(size=targets.shape[0], random_state=rng) for n in target_noise]
+        ).T
+        return inputs, targets
+
+    @staticmethod
+    def expand_periods(trial_info, stim, tgt):
+        """
+        Expand single stimuli and targets for each period to a trial array.
+
+        Parameters:
+        trial_info : dict
+            A dictionary containing metadata for the trial.
+        stim : array, shape (n_period, n_stim,)
+            The input stimuli for each period.
+        tgt : array, shape (n_period, n_tgt)
+            The targets for each period.
+
+        Returns:
+        stim : array, shape (duration, n_stim)
+            The input stimuli for the trial.
+        tgt : array, shape (duration, n_tgt)
+            The targets for the trial.
+        periods: array, shape (duration)
+            The period index for each timepoint.
+        """
+        stim = np.concatenate(
+            [np.tile(s, (d, 1)) for s, d in zip(stim, trial_info["durations"])]
+        )
+        tgt = np.concatenate(
+            [np.tile(t, (d, 1)) for t, d in zip(tgt, trial_info["durations"])]
+        )
+        periods = np.concatenate(
+            [np.full(d, i) for i, d in enumerate(trial_info["durations"])]
+        )
+        return stim, tgt, periods
+
+    class MemoryPro(DriscollTask):
+        n_stim = 4
+        n_tgt = 2
+        n_period = 5
+        periods = ["iti", "context", "stim", "memory", "response"]
+        angles = ["angle"]
+        flag_ixs = [0, 1]
+        stim_names = ["fixation", "response", "x", "y"]
+        tgt_names = ["x", "y"]
+        stim_groups = [[0, 1], [2, 3]]
+        tgt_groups = [[0, 1]]
+        xcolors = [getc("k"), getc("grey"), getc("tab20b:17"), getc("tab20b:19")]
+        ycolors = [getc("tab20c:0"), getc("tab20c:2")]
+        iti_stim = [0, 0, 0, 0]
+        default_params = {
+            "iti": itiexp(6, 4),
+            "context": itiexp(5, 2),
+            "stim": itiexp(2, 1),
+            "memory": itiexp(6, 4),
+            "response": itiexp(5, 2),
+            "angle": scipy.stats.uniform(0, np.pi / 4),
+            "angle_noise": scipy.stats.norm(0, 0.0),
+            "angle_norm": scipy.stats.uniform(1, 1),
+            "angle_norm_noise": scipy.stats.norm(0, 0.1),
+            "stim_noise": scipy.stats.norm(0, 0.1),
+            "target_noise": scipy.stats.norm(0, 0.1),
+        }
+
+        @classmethod
+        def _generate(self, trial_info):
+            """
+            See DriscollTask.generate
+            """
+            # generate stimuli and targets for each period
+            stim = np.zeros((self.n_period, self.n_stim))
+            tgt = np.zeros((self.n_period, self.n_tgt))
+            stim[[1, 2, 3], 0] = 1
+            stim[4, 1] = 1
+            stim[2, [2, 3]] = trial_info["noisy_points"]["angle"]
+            tgt[4] = trial_info["directions"]["angle"]
+            return stim, tgt
+
+        @classmethod
+        def generate(self, trial_info):
+            """
+            See DriscollTask.generate
+            """
+            stim, tgt = self._generate(trial_info)
+            return DriscollTasks.expand_periods(trial_info, stim, tgt)
+
+    class MemoryAnti(MemoryPro):
+
+        @classmethod
+        def generate(self, trial_info):
+            """
+            See DriscollTask.generate
+            """
+            stim, tgt = self._generate(trial_info)
+            tgt[4] = -tgt[4]
+            return DriscollTasks.expand_periods(trial_info, stim, tgt)
+
+    @staticmethod
+    def plot_session(
+        task: DriscollTask,
+        ax,
+        x,
+        y,
+        periods,
+        single_ax=False,
+        session=0,
+        legend=False,
+        flags=True,
+        stim_group_mask=None,
+        tgt_group_mask=None,
+    ):
+        """
+        Plot stimulus and target from the memory pro task.
+
+        Parameters
+        ----------
+        task : DriscollTask
+            The task to plot.
+        ax : matplotlib.axes.Axes or array of Axes
+            The axes to plot on.
+        x : np.ndarray, shape (n_sessions, session_length, 4), optional
+            The input stimuli.
+        y : np.ndarray, shape (n_sessions, session_length, 4), optional
+            The target stimuli.
+        periods : np.ndarray, optional
+            The period index for each timepoint.
+        single_ax : bool, optional
+            Whether to plot all dimensions on the same axis. Default is False.
+            If False, then ax should be a one dimensional array of length 3.
+        session : int, optional
+            The session index to plot. Default is 0.
+        legend : bool, optional
+            Whether to include a legend. Default is False.
+        flags : bool, optional
+            Whether to plot the flag dimensions. Default is True.
+        stim_group_mask : np.ndarray, optional
+            A mask for the stimulus groups to plot. Default is None in which
+            case all groups are plotted.
+        tgt_group_mask : np.ndarray, optional
+            A mask for the target groups to plot. Default is None in which
+            case all groups are plotted.
+        """
+        # ----- process args
+
+        if x is not None and th.is_tensor(x):
+            x = x.cpu().numpy()
+        if y is not None and th.is_tensor(y):
+            y = y.cpu().numpy()
+
+        xcolors = task.xcolors
+        ycolors = task.ycolors
+        if stim_group_mask is None:
+            stim_group_mask = np.ones(len(task.stim_groups))
+        if tgt_group_mask is None:
+            tgt_group_mask = np.ones(len(task.tgt_groups))
+
+        if single_ax:
+            nax = len(task.stim_groups) + len(task.tgt_groups)
+            ax = np.array([ax] * nax)
+
+        # ----- plot stimuli and targets
+        if x is not None:
+            x = x[session]
+            for i_g, group in enumerate(task.stim_groups):
+                for i_stim in group:
+                    if (i_stim in task.flag_ixs and not flags) or (
+                        not stim_group_mask[i_g]
+                    ):
+                        continue
+                    n = task.stim_names[i_stim]
+                    c = xcolors[i_stim]
+                    ax[i_g].plot(x[:, i_stim], color=c, label=n)
+
+        if y is not None:
+            y = y[session]
+            row_ofs = len(task.stim_groups)
+            for i_g, group in enumerate(task.tgt_groups):
+                for i_stim in group:
+                    if not tgt_group_mask[i_g]:
+                        continue
+                    n = task.tgt_names[i_stim]
+                    c = ycolors[i_stim]
+                    ax[i_g + row_ofs].plot(y[:, i_stim], color=c, label=n)
+
+        # ----- plot vertical lines for periods
+        if periods is not None:
+            periods = periods[session]
+            for t in np.where(np.diff(periods) != 0)[0]:
+                for a in ax:
+                    a.axvline(
+                        t,
+                        color=".6" if periods[t] == 0 else ".9",
+                        lw=1,
+                        zorder=-1,
+                    )
+
+        if legend:
+            for a in ax:
+                vu.legend(a)
 
 
 class DriscollPlots:
 
     def memorypro(
-        ax, x, y, periods, xcolors, ycolors, single_ax=False, session=0, legend=False, flags=True,
+        ax,
+        x,
+        y,
+        periods,
+        xcolors,
+        ycolors,
+        single_ax=False,
+        session=0,
+        legend=False,
+        flags=True,
     ):
         """
         Plot stimulus and target from the memory pro task.
@@ -358,6 +853,7 @@ class DriscollPlots:
 
     memorypro_xcolors = [getc("k"), getc("grey"), getc("tab20b:17"), getc("tab20b:19")]
     memorypro_ycolors = [getc("tab20c:0"), getc("tab20c:2")]
+
 
 def periwindows(signal, flag, radius):
     """
