@@ -176,6 +176,64 @@ class BasicRNN(NegRNN):
         self.h2y = nn.Linear(self.nh, self.ny, bias=bias)
 
 
+class BasicRNN_LN(nn.Module):
+    def __init__(
+        self,
+        nx=4,
+        nh=10,
+        ny=None,
+        alpha=0.1,
+        act=nn.Sigmoid(),
+        h_bias=0,
+        w_scale=1,
+        act_ofs=0,
+        bias = False,
+    ):
+        """
+        Approximate dynamical RNN with negative weights.
+
+        Parameters
+        ----------
+        alpha : float
+            Step size divided by time constant, or equivalently a coefficient
+            for convex combination of (in [0, 1]) $h_{t-1}$ and $f(h_{t-1})$ in
+            the hidden state update rule, with `alpha` equal to 1 corresponding
+            to a no-memory update.
+        """
+        nn.Module.__init__(self)
+        init_dynamical_rnn(self, nx, nh, ny, alpha, act, h_bias, w_scale, act_ofs)
+
+        self.i2h = nn.Linear(self.nx, self.nh, bias=bias)
+        self.h2h = nn.Linear(self.nh, self.nh, bias=bias)
+        self.h2y = nn.Linear(self.nh, self.ny, bias=bias)
+        self.hbn = nn.LayerNorm(self.nh, elementwise_affine=False)
+
+    @jit.export
+    def forward(self, x, h):
+        h_norm = self.hbn(h)
+        I = self.w_scale * self.h2h(h_norm) + self.i2h(x)
+        fh = self.act(I + self.h_bias) + self.act_ofs
+        h_new = (1 - self.alpha) * h + self.alpha * fh
+        y = self.h2y(h_new)
+        return y, h_new
+
+    @jit.export
+    def seq_forward(self, x, h):
+        y = []
+        hs = []
+        for i in range(x.shape[1]):
+            y_, h = self.forward(x[:, i], h)
+            y.append(y_)
+            hs.append(h)
+        return th.stack(y, dim=1), th.stack(hs, dim=1)
+    
+    def init_hidden(self, batch_size, device = None):
+        return th.zeros(batch_size, self.nh, device=device)
+
+    def init_weights(self):
+        pass
+
+
 ### ------------------------------------------------- Fitting and plotting ----
 
 
@@ -189,6 +247,9 @@ def fit_rnn(
     n_steps=2000,
     return_h=True,
     lr=None,
+    device=None,
+    session_batch=None,
+    batch_seed=None,
 ):
     """
     Fit an RNN to batched sequences.
@@ -215,6 +276,15 @@ def fit_rnn(
         Whether to return the hidden state values at each epoch.
     lr : object
         `torch.optim` learning rate scheduler.
+    device : str or th.device, optional
+        If given a device to move training data before running the network. Will
+        be moved each step / batch, so if not batching it is better to manually
+        move the manually before passing.
+    session_batch : int
+        If given, the number of sessions to train on in each step. This is
+        useful for training on large datasets that do not fit in GPU memory.
+    batch_seed : int
+        The seed to use for sampling batches.
 
     Returns
     -------
@@ -234,13 +304,24 @@ def fit_rnn(
     yhats = []
     h_hist = []
     lr_hist = []
+    rng = np.random.default_rng(batch_seed)
 
     if h_init is None:
         h_init = rnn.init_hidden(x.shape[0], device=x.device)
     for i in tqdm.trange(n_steps):
+        if session_batch is not None:
+            idx = rng.choice(x.shape[0], session_batch, replace=False).tolist()
+            x_ = x[idx]
+            y_ = y[idx]
+            h_init_ = h_init[idx]
+        else:
+            x_ = x
+            y_ = y
+            h_init_ = h_init
+
         opt.zero_grad()
-        yhat, hs = rnn.seq_forward(x, h_init)
-        loss = loss_fn(yhat, y)
+        yhat, hs = rnn.seq_forward(x_, h_init_)
+        loss = loss_fn(yhat, y_)
         loss.backward()
         opt.step()
         losses.append(loss.detach().cpu().numpy())

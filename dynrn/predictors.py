@@ -104,6 +104,7 @@ def load_dsn(model_path, device=None):
     ----------
     model_path : str
         Path to the model file, without the extension, or with extension '.pt'.
+    
     Returns
     -------
     model : nn.Module

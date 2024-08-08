@@ -7,6 +7,7 @@ import pandas as pd
 from collections import defaultdict
 from cmap import Colormap
 from typing import TypedDict, Union, List
+import matplotlib.pyplot as plt
 
 from .viz.styles import getc
 
@@ -299,7 +300,8 @@ class DriscollTasks:
 
     class TrialInfo(TypedDict):
         """
-        Properties:
+        Properties
+        ----------
         duration : int
             Total duration of the trial.
         durations : list[int], length n_period
@@ -341,7 +343,8 @@ class DriscollTasks:
 
     class DriscollTask:
         """
-        Properties:
+        Properties
+        ----------
         n_stim : int
             The number (dimension) of input stimuli.
         n_tgt : int
@@ -401,11 +404,13 @@ class DriscollTasks:
             """
             Generate a trial for the task.
 
-            Parameters:
+            Parameters
+            ----------
             trial_info : dict
                 A dictionary containing metadata for the trial.
 
-            Returns:
+            Returns
+            -------
             inputs : np.ndarray, shape (trial_info.duration, n_stim)
                 The input stimuli for the trial.
             targets : np.ndarray, shape (trial_info.duration, n_tgt)
@@ -422,7 +427,7 @@ class DriscollTasks:
         session_length: int,
         params: dict = {},
         seed: int = 0,
-    ):
+    ) -> "DriscollTasks.SingleTaskDataset":
         params = {**task.default_params, **params}
         stimuli = np.zeros((n_sessions, session_length, task.n_stim))
         targets = np.zeros((n_sessions, session_length, task.n_tgt))
@@ -438,7 +443,7 @@ class DriscollTasks:
                 if t + dur >= session_length:
                     break
 
-                stm, tgt, prd = task.generate(trial_info)
+                stm, tgt, prd = task.generate(params, trial_info)
                 stm, tgt = DriscollTasks._add_trial_noise(stm, tgt, params, rng)
                 stimuli[i, t : t + dur] = stm
                 targets[i, t : t + dur] = tgt
@@ -456,7 +461,15 @@ class DriscollTasks:
             targets[i, t:] = tgt
             periods[i, t:] = 0
 
-        return stimuli, targets, periods, trials
+        return DriscollTasks.SingleTaskDataset(
+            stimuli=stimuli,
+            targets=targets,
+            periods=periods,
+            trials=trials,
+            n_sessions=n_sessions,
+            session_length=session_length,
+            task=task,
+        )
 
     @staticmethod
     def _generate_trial_info(
@@ -467,7 +480,8 @@ class DriscollTasks:
         """
         Generate metadata for a trial of the task.
 
-        Parameters:
+        Parameters
+        ----------
         task : DriscollTask
             The task to generate metadata for.
         params : dict[str, rvc | list[rvc]]
@@ -475,7 +489,8 @@ class DriscollTasks:
         rng : np.random.Generator
             The random number generator to use for sampling
 
-        Returns:
+        Returns
+        -------
         trial_info : dict
             A dictionary containing metadata for the trial.
         """
@@ -523,13 +538,15 @@ class DriscollTasks:
         """
         Add metadata to a trial_info dict.
 
-        Parameters:
+        Parameters
+        ----------
         trial_info : dict
             A dictionary containing metadata for the trial.
         start : int
             The timepoint at which the trial starts in the session.
 
-        Returns:
+        Returns
+        -------
         trial_meta : dict
             A dictionary containing metadata for the trial.
         """
@@ -553,7 +570,8 @@ class DriscollTasks:
         """
         Add noise to input and target stimuli.
 
-        Parameters:
+        Parameters
+        ----------
         inputs : np.ndarray, shape (duration, n_stim)
             The input stimuli for the trial.
         targets : np.ndarray, shape (duration, n_tgt)
@@ -563,7 +581,8 @@ class DriscollTasks:
         rng : np.random.Generator
             The random number generator to use for sampling
 
-        Returns:
+        Returns
+        -------
         inputs : np.ndarray, shape (duration, n_stim)
             The input stimuli for the trial with noise added.
         targets : np.ndarray, shape (duration, n_tgt)
@@ -590,7 +609,8 @@ class DriscollTasks:
         """
         Expand single stimuli and targets for each period to a trial array.
 
-        Parameters:
+        Parameters
+        ----------
         trial_info : dict
             A dictionary containing metadata for the trial.
         stim : array, shape (n_period, n_stim,)
@@ -598,7 +618,8 @@ class DriscollTasks:
         tgt : array, shape (n_period, n_tgt)
             The targets for each period.
 
-        Returns:
+        Returns
+        -------
         stim : array, shape (duration, n_stim)
             The input stimuli for the trial.
         tgt : array, shape (duration, n_tgt)
@@ -637,16 +658,16 @@ class DriscollTasks:
             "stim": itiexp(2, 1),
             "memory": itiexp(6, 4),
             "response": itiexp(5, 2),
-            "angle": scipy.stats.uniform(0, np.pi / 4),
-            "angle_noise": scipy.stats.norm(0, 0.0),
+            "angle": scipy.stats.uniform(0, np.pi / 2),
+            "angle_noise": scipy.stats.uniform(-np.pi / 16, np.pi / 8),
             "angle_norm": scipy.stats.uniform(1, 1),
-            "angle_norm_noise": scipy.stats.norm(0, 0.1),
+            "angle_norm_noise": scipy.stats.norm(0, 0.),
             "stim_noise": scipy.stats.norm(0, 0.1),
             "target_noise": scipy.stats.norm(0, 0.1),
         }
 
         @classmethod
-        def _generate(self, trial_info):
+        def _generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
             """
             See DriscollTask.generate
             """
@@ -660,47 +681,60 @@ class DriscollTasks:
             return stim, tgt
 
         @classmethod
-        def generate(self, trial_info):
+        def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
             """
             See DriscollTask.generate
             """
-            stim, tgt = self._generate(trial_info)
+            stim, tgt = self._generate(params, trial_info)
             return DriscollTasks.expand_periods(trial_info, stim, tgt)
 
     class MemoryAnti(MemoryPro):
 
         @classmethod
-        def generate(self, trial_info):
+        def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
             """
             See DriscollTask.generate
             """
-            stim, tgt = self._generate(trial_info)
+            stim, tgt = self._generate(params, trial_info)
             tgt[4] = -tgt[4]
+            return DriscollTasks.expand_periods(trial_info, stim, tgt)
+        
+    class MemoryRev(MemoryPro):
+
+        @classmethod
+        def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
+            """
+            See DriscollTask.generate
+            """
+            stim, tgt = self._generate(params, trial_info)
+            tgt[4] = tgt[4, ::-1]
             return DriscollTasks.expand_periods(trial_info, stim, tgt)
 
     @staticmethod
     def plot_session(
-        task: DriscollTask,
-        ax,
-        x,
-        y,
-        periods,
+        task_or_dataset: DriscollTask, # | DriscollTasks.SingleTaskDataset
+        ax=None,
+        x=None,
+        y=None,
+        periods=None,
         single_ax=False,
         session=0,
         legend=False,
         flags=True,
         stim_group_mask=None,
         tgt_group_mask=None,
+        ax_size=(4, 1),
     ):
         """
         Plot stimulus and target from the memory pro task.
 
         Parameters
         ----------
-        task : DriscollTask
-            The task to plot.
+        task : DriscollTask or SingleTaskDataset
+            The task to plot, or a dataset containing the task, stimuli,
+            targets, and periods.
         ax : matplotlib.axes.Axes or array of Axes
-            The axes to plot on.
+            The axes to plot on. If None, a new figure is created and returned.
         x : np.ndarray, shape (n_sessions, session_length, 4), optional
             The input stimuli.
         y : np.ndarray, shape (n_sessions, session_length, 4), optional
@@ -722,8 +756,25 @@ class DriscollTasks:
         tgt_group_mask : np.ndarray, optional
             A mask for the target groups to plot. Default is None in which
             case all groups are plotted.
+        ax_size : tuple, optional
+            The size of each axis in the generated figure if ax is None.
+
+        Returns
+        -------
+        fig, ax : matplotlib.figure.Figure, matplotlib.axes.Axes
+            The figure and axes of the plot if they were generated, or None
+            otherwise.
         """
+
         # ----- process args
+
+        if isinstance(task_or_dataset, dict):
+            task = task_or_dataset["task"]
+            x = task_or_dataset["stimuli"]
+            y = task_or_dataset["targets"]
+            periods = task_or_dataset["periods"]
+        else:
+            task = task_or_dataset
 
         if x is not None and th.is_tensor(x):
             x = x.cpu().numpy()
@@ -737,9 +788,40 @@ class DriscollTasks:
         if tgt_group_mask is None:
             tgt_group_mask = np.ones(len(task.tgt_groups))
 
-        if single_ax:
-            nax = len(task.stim_groups) + len(task.tgt_groups)
-            ax = np.array([ax] * nax)
+        # we have effectively turned off a group if it is all flags and
+        # flags=False, having this reflected in the mask makes job
+        # easier below
+        for i_g, g in enumerate(task.stim_groups):
+            if all(i in task.flag_ixs for i in g) and not flags:
+                stim_group_mask[i_g] = False
+        if x is None:
+            stim_group_mask = np.zeros(len(task.stim_groups), dtype=bool)
+        if y is None:
+            tgt_group_mask = np.zeros(len(task.tgt_groups), dtype=bool)
+
+        # generate correct number of axes and arrange in a list
+        return_ax = False
+        if ax is None:
+            plot_groups = [
+                False if not stim_group_mask[i_g] else True
+                for i_g, g in enumerate(task.stim_groups)
+            ] + [
+                False if not tgt_group_mask[i_g] else True
+                for i_g, g in enumerate(task.tgt_groups)
+            ]
+            nax = sum(plot_groups)
+            if single_ax:
+                fig, ax = plt.subplots(1, 1, figsize=ax_size)
+                ax = [ax] * (len(task.stim_groups) + len(task.tgt_groups))
+            else:
+                fig, ax = plt.subplots(nax, 1, figsize=(ax_size[0], nax * ax_size[1]), sharex=True)
+                # will only be accessed at indices where plot_groups is True
+                ax = ax[np.cumsum(plot_groups) - 1]
+            return_ax = True
+        else:
+            if single_ax:
+                nax = len(task.stim_groups) + len(task.tgt_groups)
+                ax = np.array([ax] * nax)
 
         # ----- plot stimuli and targets
         if x is not None:
@@ -780,6 +862,147 @@ class DriscollTasks:
         if legend:
             for a in ax:
                 vu.legend(a)
+
+        if return_ax:
+            return fig, ax
+    
+
+    def merge_datasets(
+        datasets: list["DriscollTasks.SingleTaskDataset"],
+    ) -> "DriscollTasks.MultiTaskBlockDataset":
+        """
+        Merge sessions from multiple tasks.
+
+        Parameters
+        ----------
+        sessions : list
+            Each element is a tuple of (inputs, targets, periods, trials, ) for a session.
+            The sessions to merge. These must all have a matching session
+            length, and `n_features` must be at least the number of stimuli and
+        tasks : list[DriscollTask]
+            The tasks to merge.
+
+        Returns
+        -------
+        inputs : np.ndarray, shape (n_sessions, session_length, n_features)
+            The merged input stimuli.
+        targets : np.ndarray, shape (n_sessions, session_length, n_features)
+            The merged target stimuli.
+        """
+        # Validate input shapes
+        n_stims = [d["task"].n_stim for d in datasets]
+        n_tgts = [d["task"].n_tgt for d in datasets]
+        sess_lens = [d["session_length"] for d in datasets]
+        if not all(s == sess_lens[0] for s in sess_lens):
+            raise ValueError("All sessions must have the same length.")
+        if not all(n == n_stims[0] for n in n_stims):
+            raise ValueError("All tasks must have the same number of stimuli.")
+        if not all(n == n_tgts[0] for n in n_tgts):
+            raise ValueError("All tasks must have the same number of targets.")
+        
+        # Create task flag stimuli
+        unique = set(d['task'] for d in datasets)
+        task_flags = {d['task']: np.zeros((1, sess_lens[0], len(unique))) for d in datasets}
+        for i, t in enumerate(task_flags):
+            task_flags[t][0, :, i] = 1
+        task_flags = np.concatenate([
+            np.concatenate([task_flags[d['task']]] * d['n_sessions'], axis=0)
+            for d in datasets
+        ])
+
+        # Merge datasets
+        n_sessions = sum(d["n_sessions"] for d in datasets)
+        inputs = np.concatenate([d["stimuli"] for d in datasets], axis=0)
+        inputs = np.concatenate([inputs, task_flags], axis=-1)
+        targets = np.concatenate([d["targets"] for d in datasets], axis=0)
+        periods = np.concatenate([d["periods"] for d in datasets], axis=0)
+        trials = sum([d["trials"] for d in datasets], [])
+        block_tasks = [d["task"] for d in datasets]
+        block_starts = np.cumsum([0] + [d["n_sessions"] for d in datasets])
+        block_slices = [slice(s, e) for s, e in zip(block_starts, block_starts[1:])]
+
+        return DriscollTasks.MultiTaskBlockDataset(
+            block_tasks=block_tasks,
+            block_slices=block_slices,
+            n_blocks=len(datasets),
+            stimuli=inputs,
+            n_stim=n_stims[0],
+            n_task_flags=len(unique),
+            targets=targets,
+            n_tgt=n_tgts[0],
+            periods=periods,
+            trials=trials,
+            n_sessions=n_sessions,
+            session_length=sess_lens[0],
+        )
+
+    def split_dataset(
+        dataset: "DriscollTasks.MultiTaskBlockDataset",
+    ) -> list["DriscollTasks.SingleTaskDataset"]:
+        """
+        Split a merged dataset back into individual tasks.
+
+        Parameters
+        ----------
+        dataset : DriscollTasks.MultiTaskBlockDataset
+            The merged dataset to split.
+
+        Returns
+        -------
+        datasets : list[DriscollTasks.SingleTaskDataset]
+            The split datasets.
+        """
+        datasets = []
+        for task, slc in zip(dataset["block_tasks"], dataset["block_slices"]):
+            start, end = slc.start, slc.stop
+            n_sessions = end - start
+            stimuli = dataset["stimuli"][slc]
+            targets = dataset["targets"][slc]
+            periods = dataset["periods"][slc]
+            trials = dataset["trials"][slc]
+            datasets.append(
+                DriscollTasks.SingleTaskDataset(
+                    stimuli=stimuli,
+                    targets=targets,
+                    periods=periods,
+                    trials=trials,
+                    n_sessions=n_sessions,
+                    session_length=dataset["session_length"],
+                    task=task,
+                )
+            )
+        return datasets
+
+    class SingleTaskDataset(TypedDict):
+        stimuli: np.ndarray
+        targets: np.ndarray
+        periods: np.ndarray
+        trials: list[list["DriscollTasks.TrialMeta"]]
+        n_sessions: int
+        session_length: int
+        task: "DriscollTasks.DriscollTask"
+
+    class MultiTaskBlockDataset(TypedDict):
+        """
+        Properties
+        ----------
+        block_tasks : list[DriscollTask]
+            The tasks for each block.
+        block_slices : list[slice]
+            The slices for each block in the merged dataset.
+        """
+        block_tasks: list["DriscollTasks.DriscollTask"]
+        block_slices: list[slice]
+        n_blocks: int
+        stimuli: np.ndarray
+        n_stim: int
+        n_task_flags: int
+        targets: np.ndarray
+        n_tgt: int
+        periods: np.ndarray
+        trials: list[list["DriscollTasks.TrialMeta"]]
+        n_sessions: int
+        session_length: int
 
 
 class DriscollPlots:
@@ -1037,7 +1260,8 @@ def extract_trial_data(
 ):
     """
 
-    Parameters:
+    Parameters
+    ----------
     f : function
         A function to apply to each trial / period returning a scalar.
     trials : list of dict
@@ -1077,7 +1301,8 @@ def extract_trial_data(
 
 def nanstack(x, axis=0):
     """
-    Parameters:
+    Parameters
+    ----------
     x : list of np.ndarray
         A list of arrays to stack. Each array must have the same shape.
     axis : int
@@ -1113,7 +1338,8 @@ def apply_to_trial_groups(f, trials, groups, as_array=False):
 
     Only accepts windowed data.
 
-    Parameters:
+    Parameters
+    ----------
     f : function
         A function to apply to each group of trials. To match structure of
         `trials`, this should return a dictionary of arrays or lists of arrays.
