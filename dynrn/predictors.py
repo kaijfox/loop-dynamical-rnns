@@ -195,23 +195,23 @@ def fit_dsn(
 
 
 def td_loss(prediction, cumulant, gamma, loss_fn = nn.MSELoss()):
-        """
-        For a black box differentiable function F(x) and sequence data
-        $x_t\in\mathbb{R}^n$, $y_t\in\mathbb{R}^m$, minimize the objective
-        $L = ||y_{t->t+1} + gamma * F(x_{t+1}) - F(x_t)||^2$
-        if `loss_fn` is nn.MSELoss(), or more generally minimize
-        $L = loss_fn(y_{t+1} + gamma * F(x_{t+1}), F(x_t)).$
-        
-        Parameters
-        ----------
-        prediction : shape (..., n_time, n_dim)
-            Predictions of discounted future cumulant, $F(x)$.
-        cumulant : shape (..., n_time - 1, n_dim)
-            Cumulant (e.g., reward) term in target Bellman equation, $y$.
-        """
-        Fx_tplus1 = prediction[..., 1:, :]
-        Fx_t = prediction[..., :-1, :]
-        return loss_fn(cumulant + gamma * Fx_tplus1, Fx_t)
+    """
+    For a black box differentiable function F(x) and sequence data
+    $x_t\in\mathbb{R}^n$, $y_t\in\mathbb{R}^m$, minimize the objective
+    $L = ||y_{t->t+1} + gamma * F(x_{t+1}) - F(x_t)||^2$
+    if `loss_fn` is nn.MSELoss(), or more generally minimize
+    $L = loss_fn(y_{t+1} + gamma * F(x_{t+1}), F(x_t)).$
+    
+    Parameters
+    ----------
+    prediction : shape (..., n_time, n_dim)
+        Predictions of discounted future cumulant, $F(x)$.
+    cumulant : shape (..., n_time - 1, n_dim)
+        Cumulant (e.g., reward) term in target Bellman equation, $y$.
+    """
+    Fx_tplus1 = prediction[..., 1:, :]
+    Fx_t = prediction[..., :-1, :]
+    return loss_fn(cumulant + gamma * Fx_tplus1, Fx_t)
 
 
 def discounted_sums(x, gamma):

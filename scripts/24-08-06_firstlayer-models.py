@@ -13,7 +13,8 @@ output_root:
     Root directory to save the model, within which the hash will be unique.
 output_path:
     Path to save the model within the root, can contain a substring `{hash}` to
-    insert a time-based hash.
+    insert a time-based hash. Should end in `_{hash}.pt` to correctly check for
+    uniqueness.
 bottleneck, int:
     Number of units in the bottleneck layer.
 gamma, float:

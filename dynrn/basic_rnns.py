@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 import tqdm
+import dill
 
 from .viz import styles
 
@@ -246,10 +247,12 @@ def fit_rnn(
     h_init=None,
     n_steps=2000,
     return_h=True,
+    return_preds=True,
     lr=None,
     device=None,
     session_batch=None,
     batch_seed=None,
+    checkpoint_every=None,
 ):
     """
     Fit an RNN to batched sequences.
@@ -285,30 +288,40 @@ def fit_rnn(
         useful for training on large datasets that do not fit in GPU memory.
     batch_seed : int
         The seed to use for sampling batches.
+    return_preds : bool
+        Whether to return the predicted values at each epoch.
+    checkpoint_every : int
+        Return copies of the model from every `checkpoint_every` epochs.
 
     Returns
     -------
     losses : np.ndarray
         The loss values at each epoch.
     yhats : np.ndarray
-        The predicted output values at each epoch.
+        The predicted output values at each epoch. Returned only if
+        `return_preds` is True.
     h_hist : list[np.ndarray]
         The hidden state values at each epoch, returned only if `return_h` is
         True. Not stacked because this can crash the kernel for long trainings
         of large networks.
     lr_hist : np.ndarray
         The learning rate values at each epoch, returned only if `lr` is passed.
+    ckpts : list[nn.Module]
+        The model copies at each checkpoint, returned only if `checkpoint_every`
+        is passed.
     """
 
     losses = []
     yhats = []
     h_hist = []
     lr_hist = []
+    ckpts = {}
     rng = np.random.default_rng(batch_seed)
 
     if h_init is None:
         h_init = rnn.init_hidden(x.shape[0], device=x.device)
     for i in tqdm.trange(n_steps):
+
         if session_batch is not None:
             idx = rng.choice(x.shape[0], session_batch, replace=False).tolist()
             x_ = x[idx]
@@ -318,6 +331,10 @@ def fit_rnn(
             x_ = x
             y_ = y
             h_init_ = h_init
+        if device is not None:
+            x_ = x_.to(device)
+            y_ = y_.to(device)
+            h_init_ = h_init_.to(device)
 
         opt.zero_grad()
         yhat, hs = rnn.seq_forward(x_, h_init_)
@@ -331,12 +348,19 @@ def fit_rnn(
         if lr is not None:
             lr.step()
             lr_hist.append(opt.param_groups[0]["lr"])
+        if checkpoint_every is not None and i % checkpoint_every == 0:
+            ckpts[i] = copy.deepcopy(rnn).cpu()
+        
 
-    ret = (np.stack(losses), np.stack(yhats))
+    ret = (np.stack(losses),)
+    if return_preds:
+        ret += (np.stack(yhats),)
     if return_h:
         ret += (h_hist,)
     if lr is not None:
         ret += (np.array(lr_hist),)
+    if checkpoint_every is not None:
+        ret += (ckpts,)
     return ret
 
 
@@ -528,7 +552,7 @@ def hash_or_path(path_str, ext=".*", sep=":"):
     return path_str, None
 
 
-def save_rnn(model_path, model, x, y, losses, yhats, meta={}):
+def save_rnn_deprecated(model_path, model, x, y, losses, yhats, meta={}):
     th.save(model.state_dict(), f"{model_path}.tar")
     jit.save(model, f"{model_path}.pt")
     jl.dump(
@@ -539,4 +563,65 @@ def save_rnn(model_path, model, x, y, losses, yhats, meta={}):
             "training": {"losses": losses, "yhats": yhats},
         },
         f"{model_path}.train.jl",
+    )
+
+
+def save_driscoll_rnn(
+    model_path, model, dataset_hash, task_hash, checkpoints=None, losses=None, source_meta={}
+): 
+    """
+    Write three files to disk:
+    {model_path}.tar:
+        State dictionary of `model` and state dictionaries of each model in
+        `checkpoints`.
+    {model_path}.pt:
+        Serialized `model`.
+    {model_path}.train.dil
+        Dataset object containing hashes for the task and dataset, as well as
+        training losses if available and any other metadata.
+
+    Parameters
+    ----------
+    model_path : str or Path
+        The path to save the model to. If the path ends with `.pt`, the
+        extension will be removed.
+    model : nn.Module
+        The model to save.
+    dataset_hash : str
+        The hash of the dataset used to train the model.
+    task_hash : str
+        The hash of the task used to train the model.
+    checkpoints : dict[int, nn.Module], optional
+        A dictionary of model checkpoints to save.
+    losses : list[float], optional
+        The training losses.
+    source_meta : dict, optional
+        Any additional metadata to save.
+    """
+    # Allow referencing model path via .pt extension, instead of extensionless
+    # format
+    if str(model_path).endswith(".pt"):
+        model_path = Path(str(model_path[:-4]))
+
+    th.save(
+        {
+            'state_dict': model.state_dict(),
+            'checkpoints': (
+                {i: m.state_dict() for i, m in checkpoints.items()}
+                if checkpoints is not None
+                else checkpoints
+            )
+        },
+        f"{model_path}.tar"
+    )
+
+    jit.save(model, f"{model_path}.pt")
+    dill.dump(
+        {
+            "dataset_hash": dataset_hash,
+            "task_hash": task_hash,
+            "losses": losses,
+            **source_meta,
+        },
+        open(f"{model_path}.train.dil", "wb"),
     )
