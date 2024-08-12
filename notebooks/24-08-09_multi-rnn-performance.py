@@ -115,7 +115,7 @@ def __(mo):
 def __(Path, device, dill, find_hash, rnns):
     root_dir = Path("/Users/kaifox/projects/loop/dynrn/data")
 
-    rnn_hash = "7b7844"
+    rnn_hash = "7beacb"
     rnn_path = find_hash(root_dir, rnn_hash, ".pt")
     final_rnn, rnn_ckpts, traindata = rnns.load_rnn(rnn_path, device=device)
 
