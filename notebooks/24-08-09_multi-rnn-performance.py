@@ -115,7 +115,7 @@ def __(mo):
 def __(Path, device, dill, find_hash, rnns):
     root_dir = Path("/Users/kaifox/projects/loop/dynrn/data")
 
-    rnn_hash = "7b7844"
+    rnn_hash = "7beacb"
     rnn_path = find_hash(root_dir, rnn_hash, ".pt")
     final_rnn, rnn_ckpts, traindata = rnns.load_rnn(rnn_path, device=device)
 
@@ -204,38 +204,39 @@ def __(
     _yhats = {i: test_preds[i][block][[session]] for i in _steps}
     _losses = {i: test_losses[i].mean() for i in _steps}
 
-    ncol = test_data['n_tgt'] + 1
-
-    fig, ax = plt.subplots(1, ncol, figsize = (2 * ncol, 1.5))
+    fig, ax = plt.subplots(1, 1, figsize = (2, 1.5))
     rnns.plot_rnn_training(
         _losses,
-        _yhats,
-        _tgt,
+        None,
+        np.empty([0, 0, 0]),
         epochs = _steps,
-        ex_epochs = _ex_steps,
-        ax = ax,
+        ax = [ax],
         loss_matches_epochs=True
     )
-    ax[0].set_yscale('log')
-    ax[0].plot(traindata['losses'], color = colors.neutral, lw = 0.5, zorder = -1)
+    ax.set_yscale('log')
+    ax.plot(traindata['losses'], color = colors.neutral, lw = 0.3, zorder = -1)
     plotter.finalize(fig, None)
     fig
-    return ax, block, fig, n_ex_steps, ncol, session
+    return ax, block, fig, n_ex_steps, session
 
 
 @app.cell
-def __(Colormap, np, plotter, plt, test_data, test_losses):
+def __(Colormap, np, plotter, plt, test_data, test_losses, vu):
     n_blocks = len(test_data['block_slices'])
     task_colors = Colormap('crest')(np.linspace(0.2, 0.8, n_blocks))
     _steps = np.array(sorted(list(test_losses.keys())))
 
-    _fig, _ax = plt.subplots(1,1, figsize=(2.5,1.6))
+    _fig, _ax = plt.subplots(1,1, figsize=(3,1.6))
     for _i_bl in range(n_blocks):
         block_losses = {i: test_losses[i][test_data['block_slices'][_i_bl]].mean() for i in _steps}
-        _ax.plot(_steps, [block_losses[i] for i in _steps], color = task_colors[_i_bl])
+        _task = test_data['block_tasks'][_i_bl]
+        _lbl = f"{_i_bl} {_task.short_name if hasattr(_task, 'short_name') else _task.__name__}"
+        _ax.plot(_steps, [block_losses[i] for i in _steps], color = task_colors[_i_bl], label = _lbl)
     _ax.set_yscale('log')
     _ax.set_xlabel("Training step")
     _ax.set_ylabel("Block loss")
+    _leg = vu.legend(_ax, fontsize = 6, title='block')
+    plt.setp(_leg.get_title(), fontsize=7)
     plotter.finalize(_fig, None)
     _fig
     return block_losses, n_blocks, task_colors
@@ -279,6 +280,50 @@ def __(
     DriscollTasks.plot_session(_task, y=_pred, session=0, ax=_pred_ax)
     _fig
     return block_data,
+
+
+@app.cell
+def __(
+    DriscollTasks,
+    block_data,
+    n_blocks,
+    np,
+    plotter,
+    session,
+    test_losses,
+    test_preds,
+    vu,
+):
+    _max_nax = max(len(_task.stim_groups) + 2 * len(_task.tgt_groups) for _task in [block_data[i]["task"] for i in range(n_blocks)])
+    _bigfig, _figs, _fig_grid = vu.flat_subfig_grid(n_blocks, 5, (4, _max_nax * 0.75))
+    for _ibl in range(n_blocks):
+        _fig = _figs[_ibl]
+        _task = block_data[_ibl]["task"]
+        _steps = np.array(sorted(list(test_losses.keys())))
+        _best_step = sorted(_steps, key=lambda i: test_losses[i].mean())[0]
+        _nax = len(_task.stim_groups) + 2 * len(_task.tgt_groups)
+        _, _ax, _ = vu.flat_grid(_nax, 1, ax_size = None, fig = _fig, sharex=True)
+
+        for _a1, _a2 in zip(
+            _ax[-len(_task.tgt_groups) :], _ax[len(_task.stim_groups) :]
+        ):
+            _a2.sharey(_a1)
+            _a1.set_ylabel("rnn outputs")
+            _a2.set_ylabel("targets")
+        DriscollTasks.plot_session(
+            block_data[_ibl], session=session, ax=_ax, legend=True
+        )
+        _pred = test_preds[_best_step][_ibl][[session]]
+        # arrange axes for plot_session to only plot outputs (which it thinks are targets)
+        _pred_ax = [None] * len(_task.stim_groups) + _ax[
+            -len(_task.tgt_groups) :
+        ].tolist()
+        DriscollTasks.plot_session(_task, y=_pred, session=0, ax=_pred_ax, legend=False)
+        _lbl = f"{_ibl} {_task.short_name if hasattr(_task, 'short_name') else _task.__name__}"
+        _ax[0].set_title(_lbl, fontsize=8)
+    plotter.finalize(_bigfig, None)
+    _bigfig
+    return
 
 
 @app.cell

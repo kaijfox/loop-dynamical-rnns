@@ -404,6 +404,10 @@ class DriscollTasks:
         """
         Properties
         ----------
+        name : str
+            The name of the task.
+        short_name : str
+            A shorthand name for the task.
         n_stim : int
             The number (dimension) of input stimuli.
         n_tgt : int
@@ -443,6 +447,7 @@ class DriscollTasks:
             - `target_noise` a list of distributions for each stimulus
         """
 
+        name: str
         n_stim: int
         n_tgt: int
         n_period: int
@@ -708,6 +713,8 @@ class DriscollTasks:
         it co si me re
         """
 
+        name = 'MemoryPro'
+        short_name = 'mpro'
         n_stim = 4
         n_tgt = 2
         n_period = 5
@@ -756,6 +763,8 @@ class DriscollTasks:
         it co si re
         """
 
+        name = 'DelayPro'
+        short_name = 'dpro'
         n_period = 4
         periods = ["iti", "context", "stim", "response"]
         default_params = {
@@ -784,6 +793,8 @@ class DriscollTasks:
         it co re
         """
 
+        name = 'ReactPro'
+        short_name = 'rpro'
         n_period = 3
         periods = ["iti", "context", "response"]
         default_params = {
@@ -802,15 +813,23 @@ class DriscollTasks:
             return stim, tgt
 
     class MemoryAnti(MemoryPro):
+        name = 'MemoryAnti'
+        short_name = 'manti'
         generate = classmethod(_driscoll_invert_target)
 
     class DelayAnti(DelayPro):
+        name = 'DelayAnti'
+        short_name = 'danti'
         generate = classmethod(_driscoll_invert_target)
 
     class MemoryRev(MemoryPro):
+        name = 'MemoryRev'
+        short_name = 'mrev'
         generate = classmethod(_driscoll_reverse_target)
 
     class DelayRev(DelayPro):
+        name = 'DelayRev'
+        short_name = 'drev'
         generate = classmethod(_driscoll_reverse_target)
 
     class DecisionPro(MemoryPro):
@@ -825,6 +844,8 @@ class DriscollTasks:
         0  1  2  3  4  5  6
         """
 
+        name = 'DecisionPro'
+        short_name = 'depro'
         n_period = 7
         periods = ["iti", "context", "stim1", "memory1", "stim2", "memory2", "response"]
         angles = ["angle1", "angle2"]
@@ -857,6 +878,9 @@ class DriscollTasks:
     class DecisonAnti(DecisionPro):
         """DecisionPro, responding to the smaller amplitude stimulus."""
 
+        name = 'DecisionAnti'
+        short_name = 'deanti'
+
         @classmethod
         def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
             stim, tgt, (first_angle, directions) = self._generate(params, trial_info)
@@ -867,6 +891,9 @@ class DriscollTasks:
         """DecisionPro with response to larger axis of larger-amplitude
         stimulus."""
         
+        name = 'OcclusionPro'
+        short_name = 'opro'
+
         @classmethod
         def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
             stim, tgt, (first_angle, directions) = self._generate(params, trial_info)
@@ -878,6 +905,9 @@ class DriscollTasks:
     class OcclusionAnti(OcclusionPro):
         """OcclusionPro with response to smaller axis of larger-amplitude
         stimulus."""
+
+        name = 'OcclusionAnti'
+        short_name = 'oanti'
 
         @classmethod
         def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
@@ -897,6 +927,8 @@ class DriscollTasks:
         it co s1 s2
         0  1  2  4
         """
+        name = 'DecisionReactPro'
+        short_name = 'drpro'
         n_period = 4
         periods = ["iti", "context", "stim1", "stim2"]
         default_params = {
@@ -906,6 +938,8 @@ class DriscollTasks:
 
     class DecisionReactAnti(DecisonAnti):
         """DecisionAnti with no context or memory periods."""
+        name = 'DecisionReactAnti'
+        short_name = 'dranti'
         n_period = 4
         periods = ["iti", "context", "stim1", "stim2"]
         default_params = {

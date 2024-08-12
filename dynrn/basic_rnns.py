@@ -44,6 +44,64 @@ class SignedLinear(nn.Module):
     def _weight(self):
         return (self.sign * self.scale) * (self.weight**2) * self.mask
 
+class LowRankLinear(nn.Module):
+    def __init__(self, n, n_out=None, rank=1, bias=False):
+        super().__init__()
+        self.n_in = n
+        self.n_out = n if n_out is None else n_out
+        self.rank = rank
+
+        self.v = nn.Parameter(th.Tensor(self.n_in, self.rank))
+        self.u = nn.Parameter(th.Tensor(self.n_out, self.rank))
+        if bias:
+            self.bias = nn.Parameter(th.Tensor(self.n_out))
+        else:
+            self.register_parameter("bias", None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        W = th.empty(self.n_out, self.n_in)
+        nn.init.xavier_uniform_(W)
+        with th.no_grad():
+            u, s, v = th.svd(W)
+            # truncate to self.rank
+            self.u.set_(u[:, : self.rank])
+            self.v.set_(v[:, : self.rank])
+
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(W)
+            bound = 1 / (fan_in**0.5) if fan_in > 0 else 0
+            nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, input):
+        """
+        Parameters
+        ----------
+        input : torch.Tensor, (n_batch, n_in)
+
+        Returns
+        -------
+        torch.Tensor, (n_batch, n_out)
+
+        """
+        # W = self._weight()
+        # return nn.functional.linear(input, W, self.bias)
+        return (input @ self.v) @ self.u.T + self.bias
+    
+    def _weight(self):
+        """
+        Returns
+        -------
+        torch.Tensor, (n_out, n_in)
+        """
+        return self.u @ self.v.T
+
+    def extra_repr(self) -> str:
+        return (
+            f"n_in={self.n_in}, n_out={self.n_out},"
+            "bias={self.bias is not None} rank={self.rank}"
+        )
+
 
 def init_dynamical_rnn(
     self, nx, nh, ny=None, alpha=0.1, act=nn.Sigmoid(), h_bias=0, w_scale=1, act_ofs=0
@@ -188,7 +246,7 @@ class BasicRNN_LN(nn.Module):
         h_bias=0,
         w_scale=1,
         act_ofs=0,
-        bias = False,
+        bias=False,
     ):
         """
         Approximate dynamical RNN with negative weights.
@@ -227,8 +285,83 @@ class BasicRNN_LN(nn.Module):
             y.append(y_)
             hs.append(h)
         return th.stack(y, dim=1), th.stack(hs, dim=1)
-    
-    def init_hidden(self, batch_size, device = None):
+
+    def init_hidden(self, batch_size, device=None):
+        return th.zeros(batch_size, self.nh, device=device)
+
+    def init_weights(self):
+        pass
+
+
+class BasicRNN_LR(nn.Module):
+    def __init__(
+        self,
+        nx=4,
+        nh=10,
+        ny=None,
+        alpha=0.1,
+        act=nn.Sigmoid(),
+        h_bias=0,
+        w_scale=1,
+        act_ofs=0,
+        bias=False,
+        rank=1,
+    ):
+        """
+
+        Parameters
+        ----------
+        alpha : float
+            Step size divided by time constant, or equivalently a coefficient
+            for convex combination of (in [0, 1]) $h_{t-1}$ and $f(h_{t-1})$ in
+            the hidden state update rule, with `alpha` equal to 1 corresponding
+            to a no-memory update. Only alpha == 1 supported.
+        h_bias : float
+            Bias to add to hidden state before activation (inverse threshold of
+            hidden state activation function). Only 0 supported.
+        w_scale : float
+            Scale of the weight matrix. Only 1 supported.
+        act_ofs : float
+            Constant to add to hidden state activation function (i.e. after
+            nonlinearity, base firing rate). Only 0 supported.
+        bias : bool
+            Whether to include bias terms in the linear layers.
+        rank : int
+            The rank of the weight matrix.
+
+        """
+        nn.Module.__init__(self)
+        init_dynamical_rnn(self, nx, nh, ny, alpha, act, h_bias, w_scale, act_ofs)
+        assert self.alpha == 1, "Only alpha == 1 supported."
+        assert self.h_bias == 0, "Only h_bias == 0 supported."
+        assert self.w_scale == 1, "Only w_scale == 1 supported."
+        assert self.act_ofs == 0, "Only act_ofs == 0 supported."
+        self.rank = int(rank)
+
+        self.i2h = nn.Linear(self.nx, self.nh, bias=bias)
+        self.h2h = LowRankLinear(self.nh, self.nh, self.rank, bias=bias)
+        self.h2y = nn.Linear(self.nh, self.ny, bias=bias)
+        self.hbn = nn.LayerNorm(self.nh, elementwise_affine=False)
+
+    @jit.export
+    def forward(self, x, h):
+        h_norm = self.hbn(h)
+        I = self.h2h(h_norm) + self.i2h(x)
+        h_new = self.act(I)
+        y = self.h2y(h_new)
+        return y, h_new
+
+    @jit.export
+    def seq_forward(self, x, h):
+        y = []
+        hs = []
+        for i in range(x.shape[1]):
+            y_, h = self.forward(x[:, i], h)
+            y.append(y_)
+            hs.append(h)
+        return th.stack(y, dim=1), th.stack(hs, dim=1)
+
+    def init_hidden(self, batch_size, device=None):
         return th.zeros(batch_size, self.nh, device=device)
 
     def init_weights(self):
@@ -482,11 +615,11 @@ def plot_rnn_training(
     if ex_epochs is None:
         ex_epochs = epochs
     pal = colors.ch0(epochs)
-    
+
     if th.is_tensor(x):
         x = x.numpy()
-    
-    for i in range(x.shape[-1]):    
+
+    for i in range(x.shape[-1]):
         ax[i + 1].plot(x[session, :, i], color=colors.subtle, zorder=2)
         for ep in epochs:
             ax[0].plot([ep], [losses[ep]], "o", ms=3, color=pal[ep])
@@ -578,8 +711,14 @@ def save_rnn_deprecated(model_path, model, x, y, losses, yhats, meta={}):
 
 
 def save_driscoll_rnn(
-    model_path, model, dataset_hash, task_hash, checkpoints=None, losses=None, source_meta={}
-): 
+    model_path,
+    model,
+    dataset_hash,
+    task_hash,
+    checkpoints=None,
+    losses=None,
+    source_meta={},
+):
     """
     Write three files to disk:
     {model_path}.tar:
@@ -616,14 +755,14 @@ def save_driscoll_rnn(
 
     th.save(
         {
-            'state_dict': model.state_dict(),
-            'checkpoints': (
+            "state_dict": model.state_dict(),
+            "checkpoints": (
                 {i: m.state_dict() for i, m in checkpoints.items()}
                 if checkpoints is not None
                 else checkpoints
-            )
+            ),
         },
-        f"{model_path}.tar"
+        f"{model_path}.tar",
     )
 
     jit.save(model, f"{model_path}.pt")
@@ -646,7 +785,7 @@ def load_rnn(model_path, aux=True, device=None):
     ----------
     model_path : str
         Path to the model file, without the extension, or with extension '.pt'.
-    
+
     Returns
     -------
     model : nn.Module
@@ -662,15 +801,15 @@ def load_rnn(model_path, aux=True, device=None):
     model_path = str(model_path)
     # Allow referencing model path via .pt extension, instead of extensionless
     # format
-    if model_path.endswith('.pt'):
+    if model_path.endswith(".pt"):
         model_path = model_path[:-3]
 
     # --- Load model
     model = jit.load(f"{model_path}.pt", map_location=device)
     params = th.load(f"{model_path}.tar", map_location=device)
-    model.load_state_dict(params['state_dict'])
-    ckpts = {i: copy.deepcopy(model) for i in params['checkpoints']}
-    for i, c in params['checkpoints'].items():
+    model.load_state_dict(params["state_dict"])
+    ckpts = {i: copy.deepcopy(model) for i in params["checkpoints"]}
+    for i, c in params["checkpoints"].items():
         ckpts[i].load_state_dict(c)
     ret = (model, ckpts)
     # --- Load training auxiliary data

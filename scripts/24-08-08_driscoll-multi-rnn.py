@@ -84,7 +84,7 @@ data: DriscollTasks.MultiTaskBlockDataset = data["train"]
 
 n_stim = data["n_stim"] + data["n_task_flags"]
 n_tgt = data["n_tgt"]
-if network_type == "lnrnn":
+if network_type == "lnrnn" or network_type == "lr":
     # Arg defaults
     args = {
         **dict(
@@ -92,10 +92,14 @@ if network_type == "lnrnn":
             act="Softplus",
             bias=True,
             nh=1024,
+            rank=1, # only accessed if network_type == "lr"
         ),
         **network_args,
     }
     args["act"] = getattr(nn, args["act"])()
+    lr_kws = dict(rank=args["rank"]) if network_type == "lr" else {}
+    NetClass = rnns.BasicRNN_LN if network_type == "lnrnn" else rnns.BasicRNN_LR
+    
     # Define and initialize
     th.manual_seed(0)
 
@@ -103,17 +107,19 @@ if network_type == "lnrnn":
         return th.zeros(batch_size, args["nh"], device=device)
 
     def create_model():
-        rnn = rnns.BasicRNN_LN(
+        rnn = NetClass(
             n_stim,
             args["nh"],
             n_tgt,
             alpha=args["alpha"],
             act=args["act"],
             bias=args["bias"],
+            **lr_kws,
         )
-        with th.no_grad():
-            W = scipy.stats.ortho_group.rvs(rnn.nh, random_state=0)
-            rnn.h2h.weight.data = th.tensor(W, dtype=th.float32)
+        if network_type == "lnrnn":
+            with th.no_grad():
+                W = scipy.stats.ortho_group.rvs(rnn.nh, random_state=0)
+                rnn.h2h.weight.data = th.tensor(W, dtype=th.float32)
         # Jit and transfer
         rnn.to(device)
         return jit.script(rnn)
