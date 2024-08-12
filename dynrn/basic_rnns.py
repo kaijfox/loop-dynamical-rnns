@@ -246,13 +246,14 @@ def fit_rnn(
     loss_fn=nn.MSELoss(),
     h_init=None,
     n_steps=2000,
-    return_h=True,
-    return_preds=True,
     lr=None,
     device=None,
     session_batch=None,
     batch_seed=None,
     checkpoint_every=None,
+    save_fn=None,
+    save_every=None,
+    loss_every=None,
 ):
     """
     Fit an RNN to batched sequences.
@@ -275,8 +276,6 @@ def fit_rnn(
         The initial hidden state tensor. If None, it is initialized by the RNN.
     n_steps : int
         The number of optimization steps to take.
-    return_h : bool
-        Whether to return the hidden state values at each epoch.
     lr : object
         `torch.optim` learning rate scheduler.
     device : str or th.device, optional
@@ -288,8 +287,6 @@ def fit_rnn(
         useful for training on large datasets that do not fit in GPU memory.
     batch_seed : int
         The seed to use for sampling batches.
-    return_preds : bool
-        Whether to return the predicted values at each epoch.
     checkpoint_every : int
         Return copies of the model from every `checkpoint_every` epochs.
 
@@ -311,12 +308,11 @@ def fit_rnn(
         is passed.
     """
 
-    losses = []
-    yhats = []
-    h_hist = []
     lr_hist = []
     ckpts = {}
     rng = np.random.default_rng(batch_seed)
+    if loss_every is not None:
+        losses = np.full([2, n_steps // loss_every], np.nan)
 
     if h_init is None:
         h_init = rnn.init_hidden(x.shape[0], device=x.device)
@@ -341,22 +337,25 @@ def fit_rnn(
         loss = loss_fn(yhat, y_)
         loss.backward()
         opt.step()
-        losses.append(loss.detach().cpu().numpy())
-        yhats.append(yhat.detach().cpu().numpy())
-        if return_h:
-            h_hist.append(hs.detach().cpu().numpy())
+        if loss_every is not None and i % loss_every == 0:
+            losses[0, i // loss_every] = loss.detach().cpu().numpy()
+            losses[1, i // loss_every] = i
         if lr is not None:
             lr.step()
             lr_hist.append(opt.param_groups[0]["lr"])
         if checkpoint_every is not None and i % checkpoint_every == 0:
             ckpts[i] = copy.deepcopy(rnn).cpu()
+        if save_fn is not None and i % save_every == 0:
+            save_fn(
+                {
+                    "model": rnn,
+                    "losses": losses[:, : i // loss_every],
+                    "checkpoints": ckpts,
+                }
+            )
         
 
-    ret = (np.stack(losses),)
-    if return_preds:
-        ret += (np.stack(yhats),)
-    if return_h:
-        ret += (h_hist,)
+    ret = (losses),
     if lr is not None:
         ret += (np.array(lr_hist),)
     if checkpoint_every is not None:

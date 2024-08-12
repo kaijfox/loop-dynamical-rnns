@@ -44,7 +44,7 @@ import tqdm
 import joblib as jl
 import time
 import seaborn as sns
-from dynrn.basic_rnns import timehash, hash_or_path
+from dynrn.basic_rnns import timehash, hash_or_path, find_hash
 import sys
 
 
@@ -65,8 +65,11 @@ train_args = {
         lr=1e-4,
         steps=601,
         checkpt=100,
+        logstep=10,
         n=1,
         batch=None,
+        max_ex=None,
+        cont=None,
     ),
     **eval(f"dict({sys.argv[6]})"),
 }
@@ -127,10 +130,49 @@ for i_net in range(train_args["n"]):
     rnn = create_model()
     opt = optim.Adam(rnn.parameters(), weight_decay=0, lr=train_args["lr"])
     h_init = init_hidden(x.shape[0])
+    if train_args["max_ex"] is not None:
+        M = train_args["max_ex"]
+        stride = len(x) // M
+        x = x[::stride][:M]
+        y = y[::stride][:M]
+        h_init = h_init[::stride][:M]
     if train_args["batch"] is None:
         x = x.to(device)
         y = y.to(device)
         h_init = h_init.to(device)
+
+    # load checkpoint if continuing
+    if train_args["cont"] is not None:
+        continue_hash = train_args["cont"]
+        cont_path = find_hash(rnn_root, continue_hash, ext=".pt")
+        c_rnn, c_ckpts, c_traindata = rnns.load_rnn(cont_path)
+        rnn.load_state_dict(c_rnn.state_dict())
+        opt.load_state_dict(c_traindata["opt_state"])
+        print(f"Continuing from checkpoint: {train_args['cont']}")
+    else:
+        continue_hash = None
+
+    # -------- Saving
+
+    rnn_hash = timehash(unique_within=rnn_root, ext=".pt")
+    rnn_path = rnn_root / rnn_path_fmt.format(hash=rnn_hash)
+    save_func = lambda traindata: (
+        rnns.save_driscoll_rnn(
+            rnn_path,
+            dataset_hash=dset_hash,
+            task_hash=task_hash,
+            source_meta={
+                "source": "driscoll-multi-rnn.py",
+                "network_type": network_type,
+                "network_args": network_args,
+                "continued_from_hash": continue_hash,
+                "train_args": train_args,
+                "opt_state": opt.state_dict(),
+            },
+            **traindata,
+        ),
+        print(f"Saved RNN model: {rnn_path}"),
+    )
 
     # -------- Train
 
@@ -141,29 +183,26 @@ for i_net in range(train_args["n"]):
         opt,
         n_steps=train_args["steps"],
         h_init=h_init,
-        return_h=False,
-        return_preds=False,
         device=device if train_args["batch"] is not None else None,
         session_batch=train_args["batch"],
         checkpoint_every=train_args["checkpt"],
+        loss_every=train_args["logstep"],
+        save_fn=save_func,
+        save_every=train_args["checkpt"],
     )
+
+    # merge with previous rnn history
+    if train_args["cont"] is not None:
+        ckpts = {**c_ckpts, **ckpts}
+        losses = [*c_traindata["losses"]] + losses
 
     # -------- Save
-
-    rnn_hash = timehash(unique_within=rnn_root, ext=".pt")
-    rnn_path = rnn_root / rnn_path_fmt.format(hash=rnn_hash)
-    rnns.save_driscoll_rnn(
-        rnn_path,
-        rnn,
-        dset_hash,
-        task_hash,
-        checkpoints=ckpts,
-        losses=losses,
-        source_meta={
-            "source": "driscoll-multi-rnn.py",
-            "network_type": network_type,
-            "network_args": network_args,
-            "train_args": train_args,
-        },
+    save_func(
+        {
+            "model": rnn,
+            "losses": losses,
+            "checkpoints": ckpts,
+        }
     )
+
     print(f"Saved RNN model: {rnn_path}")
