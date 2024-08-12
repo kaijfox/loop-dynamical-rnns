@@ -153,18 +153,22 @@ for i_net in range(train_args["n"]):
         cont_path = find_hash(rnn_root, continue_hash, ext=".pt")
         c_rnn, c_ckpts, c_traindata = rnns.load_rnn(cont_path)
         rnn.load_state_dict(c_rnn.state_dict())
-        opt.load_state_dict(c_traindata["opt_state"])
+        opt_state = rnns._dict_to(c_traindata["opt_state"], device)
+        opt.load_state_dict(opt_state)
+        first_step = c_traindata.get("step", -1) + 1
         print(f"Continuing from checkpoint: {train_args['cont']}")
     else:
         continue_hash = None
+        first_step=0
 
     # -------- Saving
 
     rnn_hash = timehash(unique_within=rnn_root, ext=".pt")
     rnn_path = rnn_root / rnn_path_fmt.format(hash=rnn_hash)
-    save_func = lambda traindata: (
+    save_func = lambda fitdata: (
         rnns.save_driscoll_rnn(
             rnn_path,
+            model=fitdata["model"],
             dataset_hash=dset_hash,
             task_hash=task_hash,
             source_meta={
@@ -173,9 +177,21 @@ for i_net in range(train_args["n"]):
                 "network_args": network_args,
                 "continued_from_hash": continue_hash,
                 "train_args": train_args,
-                "opt_state": opt.state_dict(),
+                "opt_state": rnns._dict_to(opt.state_dict(), "cpu"),
+                "step": fitdata["step"],
             },
-            **traindata,
+            checkpoints=(
+                fitdata["checkpoints"]
+                if train_args["cont"] is None
+                else {**c_ckpts, **fitdata["checkpoints"]}
+            ),
+            losses=(
+                fitdata["losses"]
+                if train_args["cont"] is None
+                else np.concatenate(
+                    [c_traindata["losses"], fitdata["losses"]], axis=-1
+                )
+            ),
         ),
         print(f"Saved RNN model: {rnn_path}"),
     )
@@ -195,12 +211,8 @@ for i_net in range(train_args["n"]):
         loss_every=train_args["logstep"],
         save_fn=save_func,
         save_every=train_args["checkpt"],
+        first_step=first_step,
     )
-
-    # merge with previous rnn history
-    if train_args["cont"] is not None:
-        ckpts = {**c_ckpts, **ckpts}
-        losses = [*c_traindata["losses"]] + losses
 
     # -------- Save
     save_func(
@@ -208,6 +220,7 @@ for i_net in range(train_args["n"]):
             "model": rnn,
             "losses": losses,
             "checkpoints": ckpts,
+            "step": train_args["steps"],
         }
     )
 

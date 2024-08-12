@@ -9,11 +9,27 @@ import matplotlib.pyplot as plt
 import time
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Iterable
 import tqdm
 import dill
 
 from .viz import styles
 
+
+def _dict_to(d, device):
+    """
+    Recursively apply t.to(device) to all tensors in d.
+    """
+    if th.is_tensor(d):
+        return d.to(device)
+    if hasattr(d, 'items'):
+        return {
+            k: _dict_to(v, device) for k, v in d.items()
+        }
+    if isinstance(d, Iterable):
+        return [_dict_to(v, device) for v in d]
+    return d
+    
 
 class SignedLinear(nn.Module):
     def __init__(self, n, n_out=None, sign=1, scale=1, allow_diag=True):
@@ -387,6 +403,7 @@ def fit_rnn(
     save_fn=None,
     save_every=None,
     loss_every=None,
+    first_step=0,
 ):
     """
     Fit an RNN to batched sequences.
@@ -445,11 +462,12 @@ def fit_rnn(
     ckpts = {}
     rng = np.random.default_rng(batch_seed)
     if loss_every is not None:
-        losses = np.full([2, n_steps // loss_every], np.nan)
+        losses = np.full([2, n_steps // loss_every + 1], np.nan)
 
     if h_init is None:
         h_init = rnn.init_hidden(x.shape[0], device=x.device)
-    for i in tqdm.trange(n_steps):
+    for step in tqdm.trange(first_step, n_steps + first_step):
+        i = step - first_step
 
         if session_batch is not None:
             idx = rng.choice(x.shape[0], session_batch, replace=False).tolist()
@@ -472,18 +490,19 @@ def fit_rnn(
         opt.step()
         if loss_every is not None and i % loss_every == 0:
             losses[0, i // loss_every] = loss.detach().cpu().numpy()
-            losses[1, i // loss_every] = i
+            losses[1, i // loss_every] = step
         if lr is not None:
             lr.step()
             lr_hist.append(opt.param_groups[0]["lr"])
         if checkpoint_every is not None and i % checkpoint_every == 0:
-            ckpts[i] = copy.deepcopy(rnn).cpu()
+            ckpts[step] = copy.deepcopy(rnn).cpu()
         if save_fn is not None and i % save_every == 0:
             save_fn(
                 {
                     "model": rnn,
                     "losses": losses[:, : i // loss_every],
                     "checkpoints": ckpts,
+                    "step": step,
                 }
             )
         
@@ -748,6 +767,9 @@ def save_driscoll_rnn(
     source_meta : dict, optional
         Any additional metadata to save.
     """
+    print("losses:", losses.shape)
+    print("ckpts:", checkpoints.keys())
+    print("step:", source_meta.get("step", None))
     # Allow referencing model path via .pt extension, instead of extensionless
     # format
     if str(model_path).endswith(".pt"):
