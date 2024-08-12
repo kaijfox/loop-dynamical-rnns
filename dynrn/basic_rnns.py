@@ -455,6 +455,8 @@ def plot_rnn_training(
     n_iter=5,
     session=0,
     col_buffer=3,
+    ex_epochs=None,
+    loss_matches_epochs=False,
     lr=None,
     ax=None,
 ):
@@ -470,16 +472,26 @@ def plot_rnn_training(
     else:
         ret = None
 
-    ax[0].plot(losses, color=colors.subtle)
+    if loss_matches_epochs:
+        ax[0].plot(epochs, [losses[ep] for ep in epochs], color=colors.subtle)
+    else:
+        ax[0].plot(losses, color=colors.subtle)
 
     buf = col_buffer * skip
     if epochs is None:
         epochs = range(start, len(losses), skip)
+    if ex_epochs is None:
+        ex_epochs = epochs
     pal = colors.ch0(epochs)
-    for i in range(x.shape[-1]):
-        ax[i + 1].plot(x.numpy()[session, :, i], color=colors.subtle, zorder=2)
+    
+    if th.is_tensor(x):
+        x = x.numpy()
+    
+    for i in range(x.shape[-1]):    
+        ax[i + 1].plot(x[session, :, i], color=colors.subtle, zorder=2)
         for ep in epochs:
             ax[0].plot([ep], [losses[ep]], "o", ms=3, color=pal[ep])
+        for ep in ex_epochs:
             ax[i + 1].plot(yhats[ep][session, :, i], color=pal[ep])
 
     if lr is not None:
@@ -601,7 +613,7 @@ def save_driscoll_rnn(
     # Allow referencing model path via .pt extension, instead of extensionless
     # format
     if str(model_path).endswith(".pt"):
-        model_path = Path(str(model_path[:-4]))
+        model_path = Path(str(model_path[:-3]))
 
     th.save(
         {
@@ -625,3 +637,45 @@ def save_driscoll_rnn(
         },
         open(f"{model_path}.train.dil", "wb"),
     )
+
+
+def load_rnn(model_path, aux=True, device=None):
+    """
+    Load model serialized by by `save_dsn`.
+
+    Parameters
+    ----------
+    model_path : str
+        Path to the model file, without the extension, or with extension '.pt'.
+    
+    Returns
+    -------
+    model : nn.Module
+    ckpts : dict of nn.Module
+    train_data : dict
+        Only returned if `aux` is True. Root directories for hashes are assumed
+        to be inferrable from context. Contiains:
+        - `dataset_hash`, The hash of the dataset used to train the model.
+        - `task_hash`, The hash of the task used to train the model.
+        - `losses`, The training losses.
+        - Any additional metadata passed to `save_dsn`.
+    """
+    model_path = str(model_path)
+    # Allow referencing model path via .pt extension, instead of extensionless
+    # format
+    if model_path.endswith('.pt'):
+        model_path = model_path[:-3]
+
+    # --- Load model
+    model = jit.load(f"{model_path}.pt", map_location=device)
+    params = th.load(f"{model_path}.tar", map_location=device)
+    model.load_state_dict(params['state_dict'])
+    ckpts = {i: copy.deepcopy(model) for i in params['checkpoints']}
+    for i, c in params['checkpoints'].items():
+        ckpts[i].load_state_dict(c)
+    ret = (model, ckpts)
+    # --- Load training auxiliary data
+    if aux:
+        train_data = dill.load(open(f"{model_path}.train.dil", "rb"))
+        ret = ret + (train_data,)
+    return ret

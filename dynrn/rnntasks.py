@@ -208,6 +208,65 @@ class itiexp(rvc):
         return self.exp.rvs(*a, **kw) + self.tmin
 
 
+
+# ---- set up defaults for the Driscoll tasks
+
+driscoll_one_stim = {
+    "iti": itiexp(6, 4),
+    "context": itiexp(5, 2),
+    "stim": itiexp(2, 1),
+    "memory": itiexp(6, 4),
+    "response": itiexp(5, 2),
+    "stim_noise": scipy.stats.norm(0, 0.1),
+    "target_noise": scipy.stats.norm(0, 0.1),
+}
+driscoll_two_stim = {
+    "iti": driscoll_one_stim["iti"],
+    "context": driscoll_one_stim["context"],
+    "stim1": driscoll_one_stim["stim"],
+    "memory1": driscoll_one_stim["memory"],
+    "stim2": driscoll_one_stim["stim"],
+    "memory2": driscoll_one_stim["memory"],
+    "response": driscoll_one_stim["response"],
+    "stim_noise": driscoll_one_stim["stim_noise"],
+    "target_noise": driscoll_one_stim["target_noise"],
+}
+driscoll_one_angle = {
+    "angle": scipy.stats.uniform(0, np.pi / 2),
+    "angle_noise": scipy.stats.uniform(-np.pi / 16, np.pi / 8),
+    "angle_norm": scipy.stats.uniform(1, 1),
+    "angle_norm_noise": scipy.stats.norm(0, 0.0),
+}
+driscoll_two_angle = {
+    "angle1": driscoll_one_angle["angle"],
+    "angle2": driscoll_one_angle["angle"],
+    "angle1_noise": driscoll_one_angle["angle_noise"],
+    "angle2_noise": driscoll_one_angle["angle_noise"],
+    "angle1_norm": driscoll_one_angle["angle_norm"],
+    "angle2_norm": driscoll_one_angle["angle_norm"],
+    "angle1_norm_noise": driscoll_one_angle["angle_norm_noise"],
+    "angle2_norm_noise": driscoll_one_angle["angle_norm_noise"],
+}
+
+def _driscoll_invert_target(self, params, trial_info):
+    stim, tgt = self._generate(params, trial_info)
+    tgt[-1] = -tgt[-1]
+    return stim, tgt
+
+
+def _driscoll_reverse_target(self, params, trial_info):
+    stim, tgt = self._generate(params, trial_info)
+    tgt[-1] = tgt[-1, ::-1]
+    return stim, tgt
+
+def _dict_subset(d, keys, new_key = lambda k: k):
+    return {new_key(k): d[k] for k in keys}
+
+
+def _dict_drop(d, keys):
+    return {k: v for k, v in d.items() if k not in keys}
+
+
 class DriscollTasks:
 
     @staticmethod
@@ -639,6 +698,16 @@ class DriscollTasks:
         return stim, tgt, periods
 
     class MemoryPro(DriscollTask):
+        """
+        MemoryPro task from Driscoll et al 2022
+
+        .  o  o  o  .  fixation
+        .  .  .  .  o  response
+        .  .  o  .  .  x y (stim)
+        .  .  .  .  o  x y (target)
+        it co si me re
+        """
+
         n_stim = 4
         n_tgt = 2
         n_period = 5
@@ -653,17 +722,8 @@ class DriscollTasks:
         ycolors = [getc("tab20c:0"), getc("tab20c:2")]
         iti_stim = [0, 0, 0, 0]
         default_params = {
-            "iti": itiexp(6, 4),
-            "context": itiexp(5, 2),
-            "stim": itiexp(2, 1),
-            "memory": itiexp(6, 4),
-            "response": itiexp(5, 2),
-            "angle": scipy.stats.uniform(0, np.pi / 2),
-            "angle_noise": scipy.stats.uniform(-np.pi / 16, np.pi / 8),
-            "angle_norm": scipy.stats.uniform(1, 1),
-            "angle_norm_noise": scipy.stats.norm(0, 0.),
-            "stim_noise": scipy.stats.norm(0, 0.1),
-            "target_noise": scipy.stats.norm(0, 0.1),
+            **driscoll_one_stim,
+            **driscoll_one_angle,
         }
 
         @classmethod
@@ -682,37 +742,194 @@ class DriscollTasks:
 
         @classmethod
         def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
-            """
-            See DriscollTask.generate
-            """
             stim, tgt = self._generate(params, trial_info)
             return DriscollTasks.expand_periods(trial_info, stim, tgt)
+
+    class DelayPro(MemoryPro):
+        """MemoryPro without memory period, stimulus stays on during
+        response.
+
+        .  o  o  .  fixation
+        .  .  .  o  response
+        .  .  o  o  x y (stim)
+        .  .  .  o  x y (target)
+        it co si re
+        """
+
+        n_period = 4
+        periods = ["iti", "context", "stim", "response"]
+        default_params = {
+            **_dict_drop(driscoll_one_stim, ["memory"]),
+            **driscoll_one_angle,
+        }
+
+        @classmethod
+        def _generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
+            stim = np.zeros((self.n_period, self.n_stim))
+            tgt = np.zeros((self.n_period, self.n_tgt))
+            stim[[1, 2], 0] = 1
+            stim[3, 1] = 1
+            stim[[2, 3], [2, 3]] = trial_info["noisy_points"]["angle"]
+            tgt[3] = trial_info["directions"]["angle"]
+            return stim, tgt
+
+    class ReactPro(MemoryPro):
+        """DelayPro without stimulus period, stimulus appears at same time as
+        response.
+
+        .  o  .  fixation
+        .  .  o  response
+        .  .  o  x y (stim)
+        .  .  o  x y (target)
+        it co re
+        """
+
+        n_period = 3
+        periods = ["iti", "context", "response"]
+        default_params = {
+            **_dict_drop(driscoll_one_stim, ["stim", "memory"]),
+            **driscoll_one_angle,
+        }
+
+        @classmethod
+        def _generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
+            stim = np.zeros((self.n_period, self.n_stim))
+            tgt = np.zeros((self.n_period, self.n_tgt))
+            stim[[1, 2], 0] = 1
+            stim[2, 1] = 1
+            stim[2, [2, 3]] = trial_info["noisy_points"]["angle"]
+            tgt[2] = trial_info["directions"]["angle"]
+            return stim, tgt
 
     class MemoryAnti(MemoryPro):
+        generate = classmethod(_driscoll_invert_target)
+
+    class DelayAnti(DelayPro):
+        generate = classmethod(_driscoll_invert_target)
+
+    class MemoryRev(MemoryPro):
+        generate = classmethod(_driscoll_reverse_target)
+
+    class DelayRev(DelayPro):
+        generate = classmethod(_driscoll_reverse_target)
+
+    class DecisionPro(MemoryPro):
+        """
+        Recieve two direction stimuli and respond with the larger amplitude one.
+
+        .  o  o  o  o  o  .  fixation
+        .  .  .  .  .  .  o  response
+        .  .  o  .  o  .  .  x y (stim)
+        .  .  .  .  .  .  o  x y (target)
+        it co s1 m1 s2 m2 re
+        0  1  2  3  4  5  6
+        """
+
+        n_period = 7
+        periods = ["iti", "context", "stim1", "memory1", "stim2", "memory2", "response"]
+        angles = ["angle1", "angle2"]
+        default_params = {
+            **driscoll_two_stim,
+            **driscoll_two_angle,
+        }
+
+        @classmethod
+        def _generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
+            stim = np.zeros((self.n_period, self.n_stim))
+            tgt = np.zeros((self.n_period, self.n_tgt))
+            stm1 = self.periods.index('stm1')
+            stm2 = self.periods.index('stm2')
+            self.n_period = list(range(1, self.n_period-1))
+            stim[self.n_period, 0] = 1 # fixation flag in all periods but iti and last
+            stim[self.n_period - 1, 1] = 1 # response flag in last period
+            stim[stm1, [2, 3]] = trial_info["noisy_points"]["angle1"] # angle1 in stim1
+            stim[stm2, [2, 3]] = trial_info["noisy_points"]["angle2"] # angle2 in stim2
+            directions = [trial_info["directions"][a] for a in self.angles]
+            first_angle = trial_info["norms"]["angle1"] > trial_info["norms"]["angle2"]
+            return stim, tgt, (first_angle, directions)
+        
+        @classmethod
+        def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
+            stim, tgt, (first_angle, directions) = self._generate(params, trial_info)
+            tgt[-1] = directions[0] if first_angle else directions[1]
+            return DriscollTasks.expand_periods(trial_info, stim, tgt)
+    
+    class DecisonAnti(DecisionPro):
+        """DecisionPro, responding to the smaller amplitude stimulus."""
 
         @classmethod
         def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
-            """
-            See DriscollTask.generate
-            """
-            stim, tgt = self._generate(params, trial_info)
-            tgt[4] = -tgt[4]
+            stim, tgt, (first_angle, directions) = self._generate(params, trial_info)
+            tgt[-1] = directions[1] if first_angle else directions[0]
+            return DriscollTasks.expand_periods(trial_info, stim, tgt)
+
+    class OcclusionPro(DecisionPro):
+        """DecisionPro with response to larger axis of larger-amplitude
+        stimulus."""
+        
+        @classmethod
+        def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
+            stim, tgt, (first_angle, directions) = self._generate(params, trial_info)
+            tgt[-1] = directions[0] if first_angle else directions[1]
+            first_larger = tgt[-1, 0] > tgt[-1, 1]
+            stim[6, 1 if first_larger else 0] = 0 # remove the smaller axis
+            return DriscollTasks.expand_periods(trial_info, stim, tgt)
+
+    class OcclusionAnti(OcclusionPro):
+        """OcclusionPro with response to smaller axis of larger-amplitude
+        stimulus."""
+
+        @classmethod
+        def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
+            stim, tgt, (first_angle, directions) = self._generate(params, trial_info)
+            tgt[-1] = directions[0] if first_angle else directions[1]
+            first_larger = tgt[-1, 0] > tgt[-1, 1]
+            stim[6, 0 if first_larger else 1] = 0 # remove the larger axis
             return DriscollTasks.expand_periods(trial_info, stim, tgt)
         
-    class MemoryRev(MemoryPro):
+    class DecisionReactPro(DecisionPro):
+        """DecisionPro with no context or memory periods.
+        
+        .  o  o  .  fixation
+        .  .  .  o  response
+        .  .  o  o  x y (stim)
+        .  .  .  o  x y (target)
+        it co s1 s2
+        0  1  2  4
+        """
+        n_period = 4
+        periods = ["iti", "context", "stim1", "stim2"]
+        default_params = {
+            **_dict_drop(driscoll_two_stim, ["memory1", "memory2", "response"]),
+            **driscoll_two_angle,
+        }
 
-        @classmethod
-        def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
-            """
-            See DriscollTask.generate
-            """
-            stim, tgt = self._generate(params, trial_info)
-            tgt[4] = tgt[4, ::-1]
-            return DriscollTasks.expand_periods(trial_info, stim, tgt)
+    class DecisionReactAnti(DecisonAnti):
+        """DecisionAnti with no context or memory periods."""
+        n_period = 4
+        periods = ["iti", "context", "stim1", "stim2"]
+        default_params = {
+            **_dict_drop(driscoll_two_stim, ["memory1", "memory2", "response"]),
+            **driscoll_two_angle,
+        }
+
+        
+
+    
+
+    
+
+
+
+
+
+    
+    
+    
 
     @staticmethod
     def plot_session(
-        task_or_dataset: DriscollTask, # | DriscollTasks.SingleTaskDataset
+        task_or_dataset: DriscollTask,  # | DriscollTasks.SingleTaskDataset
         ax=None,
         x=None,
         y=None,
@@ -814,7 +1031,9 @@ class DriscollTasks:
                 fig, ax = plt.subplots(1, 1, figsize=ax_size)
                 ax = [ax] * (len(task.stim_groups) + len(task.tgt_groups))
             else:
-                fig, ax = plt.subplots(nax, 1, figsize=(ax_size[0], nax * ax_size[1]), sharex=True)
+                fig, ax = plt.subplots(
+                    nax, 1, figsize=(ax_size[0], nax * ax_size[1]), sharex=True
+                )
                 # will only be accessed at indices where plot_groups is True
                 ax = ax[np.cumsum(plot_groups) - 1]
             return_ax = True
@@ -865,7 +1084,6 @@ class DriscollTasks:
 
         if return_ax:
             return fig, ax
-    
 
     def merge_datasets(
         datasets: list["DriscollTasks.SingleTaskDataset"],
@@ -899,16 +1117,20 @@ class DriscollTasks:
             raise ValueError("All tasks must have the same number of stimuli.")
         if not all(n == n_tgts[0] for n in n_tgts):
             raise ValueError("All tasks must have the same number of targets.")
-        
+
         # Create task flag stimuli
-        unique = set(d['task'] for d in datasets)
-        task_flags = {d['task']: np.zeros((1, sess_lens[0], len(unique))) for d in datasets}
+        unique = set(d["task"] for d in datasets)
+        task_flags = {
+            d["task"]: np.zeros((1, sess_lens[0], len(unique))) for d in datasets
+        }
         for i, t in enumerate(task_flags):
             task_flags[t][0, :, i] = 1
-        task_flags = np.concatenate([
-            np.concatenate([task_flags[d['task']]] * d['n_sessions'], axis=0)
-            for d in datasets
-        ])
+        task_flags = np.concatenate(
+            [
+                np.concatenate([task_flags[d["task"]]] * d["n_sessions"], axis=0)
+                for d in datasets
+            ]
+        )
 
         # Merge datasets
         n_sessions = sum(d["n_sessions"] for d in datasets)
@@ -991,6 +1213,7 @@ class DriscollTasks:
         block_slices : list[slice]
             The slices for each block in the merged dataset.
         """
+
         block_tasks: list["DriscollTasks.DriscollTask"]
         block_slices: list[slice]
         n_blocks: int

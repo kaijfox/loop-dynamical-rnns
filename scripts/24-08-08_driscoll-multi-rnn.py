@@ -127,6 +127,10 @@ for i_net in range(train_args["n"]):
     rnn = create_model()
     opt = optim.Adam(rnn.parameters(), weight_decay=0, lr=train_args["lr"])
     h_init = init_hidden(x.shape[0])
+    if train_args["batch"] is None:
+        x = x.to(device)
+        y = y.to(device)
+        h_init = h_init.to(device)
 
     # -------- Train
 
@@ -139,7 +143,7 @@ for i_net in range(train_args["n"]):
         h_init=h_init,
         return_h=False,
         return_preds=False,
-        device=device,
+        device=device if train_args["batch"] is not None else None,
         session_batch=train_args["batch"],
         checkpoint_every=train_args["checkpt"],
     )
