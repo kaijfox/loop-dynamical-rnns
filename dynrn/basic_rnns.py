@@ -790,9 +790,6 @@ def save_driscoll_rnn(
     source_meta : dict, optional
         Any additional metadata to save.
     """
-    print("losses:", losses.shape)
-    print("ckpts:", checkpoints.keys())
-    print("step:", source_meta.get("step", None))
     # Allow referencing model path via .pt extension, instead of extensionless
     # format
     if str(model_path).endswith(".pt"):
