@@ -348,7 +348,6 @@ class BasicRNN_LR(nn.Module):
         """
         nn.Module.__init__(self)
         init_dynamical_rnn(self, nx, nh, ny, alpha, act, h_bias, w_scale, act_ofs)
-        assert self.alpha == 1, "Only alpha == 1 supported."
         assert self.h_bias == 0, "Only h_bias == 0 supported."
         assert self.w_scale == 1, "Only w_scale == 1 supported."
         assert self.act_ofs == 0, "Only act_ofs == 0 supported."
@@ -363,7 +362,8 @@ class BasicRNN_LR(nn.Module):
     def forward(self, x, h):
         h_norm = self.hbn(h)
         I = self.h2h(h_norm) + self.i2h(x)
-        h_new = self.act(I)
+        fh = self.act(I)
+        h_new = (1 - self.alpha) * h + self.alpha * fh
         y = self.h2y(h_new)
         return y, h_new
 
