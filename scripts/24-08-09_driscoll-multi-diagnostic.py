@@ -94,52 +94,61 @@ for step, rnn in tqdm.tqdm(rnn_ckpts.items()):
 
 # -------- Plotting
 
-def plot_loss():
-    block = 0
-    session = 0
-    n_exsteps = 3
 
-    # _tgt = test_data['targets'][test_data['block_slices'][block]][[session]]
+def plot_loss():
     steps = np.array(sorted(list(test_losses.keys())))
-    # _yhats = {i: test_preds[i][block][[session]] for i in _steps}
     _losses = {i: test_losses[i].mean() for i in steps}
 
-    fig, ax = plt.subplots(1, 1, figsize = (2, 1.5))
+    fig, ax = plt.subplots(1, 1, figsize=(2, 1.5))
     rnns.plot_rnn_training(
         _losses,
         None,
         np.empty([0, 0, 0]),
-        epochs = steps,
-        ax = [ax],
-        loss_matches_epochs=True
+        epochs=steps,
+        ax=[ax],
+        loss_matches_epochs=True,
     )
-    ax.set_yscale('log')
-    ax.plot(traindata['losses'], color = colors.neutral, lw = 0.3, zorder = -1)
+    ax.set_yscale("log")
+    # two possible formats for saved losses (1D, or 2D with epoch included)
+    if np.array(traindata["losses"]).ndim > 1:
+        ax.plot(*traindata["losses"][::-1], color=colors.neutral, lw=0.3, zorder=-1)
+    else:
+        ax.plot(traindata["losses"], color=colors.neutral, lw=0.3, zorder=-1)
     return fig
-    
+
 
 def plot_blockwise_loss():
-    n_blocks = len(test_data['block_slices'])
-    task_colors = Colormap('crest')(np.linspace(0.2, 0.8, n_blocks))
+    n_blocks = len(test_data["block_slices"])
+    task_colors = Colormap("crest")(np.linspace(0.2, 0.8, n_blocks))
     steps = np.array(sorted(list(test_losses.keys())))
 
-    fig, ax = plt.subplots(1,1, figsize=(3,1.6))
+    fig, ax = plt.subplots(1, 1, figsize=(3, 1.6))
     for i in range(n_blocks):
-        block_losses = {i: test_losses[i][test_data['block_slices'][i]].mean() for i in steps}
-        task = test_data['block_tasks'][i]
-        _lbl = f"{i} {task.short_name if hasattr(task, 'short_name') else task.__name__}"
-        ax.plot(steps, [block_losses[i] for i in steps], color = task_colors[i], label = _lbl)
-    ax.set_yscale('log')
+        block_losses = {
+            j: test_losses[j][test_data["block_slices"][i]].mean() for j in steps
+        }
+        task = test_data["block_tasks"][i]
+        _lbl = (
+            f"{i} {task.short_name if hasattr(task, 'short_name') else task.__name__}"
+        )
+        ax.plot(
+            steps, [block_losses[i] for i in steps], color=task_colors[i], label=_lbl
+        )
+    ax.set_yscale("log")
     ax.set_xlabel("Training step")
     ax.set_ylabel("Block loss")
-    leg = vu.legend(ax, fontsize = 6, title='block')
+    leg = vu.legend(ax, fontsize=6, title="block")
     plt.setp(leg.get_title(), fontsize=7)
     return fig
-    
-def plot_block_examples(session = 0):
-    n_blocks = len(test_data['block_slices'])
+
+
+def plot_block_examples(session=0):
+    n_blocks = len(test_data["block_slices"])
     block_data = DriscollTasks.split_dataset(test_data)
-    max_nax = max(len(_task.stim_groups) + 2 * len(_task.tgt_groups) for _task in [block_data[i]["task"] for i in range(n_blocks)])
+    max_nax = max(
+        len(_task.stim_groups) + 2 * len(_task.tgt_groups)
+        for _task in [block_data[i]["task"] for i in range(n_blocks)]
+    )
     bigfig, figs, _ = vu.flat_subfig_grid(n_blocks, 5, (4, max_nax * 0.75))
     for ibl in range(n_blocks):
         fig = figs[ibl]
@@ -147,23 +156,37 @@ def plot_block_examples(session = 0):
         steps = np.array(sorted(list(test_losses.keys())))
         best_step = sorted(steps, key=lambda i: test_losses[i].mean())[0]
         nax = len(task.stim_groups) + 2 * len(task.tgt_groups)
-        _, ax, _ = vu.flat_grid(nax, 1, ax_size = None, fig = fig, sharex=True)
+        _, ax, _ = vu.flat_grid(nax, 1, ax_size=None, fig=fig, sharex=True)
 
-        for a1, a2 in zip(
-            ax[-len(task.tgt_groups) :], ax[len(task.stim_groups) :]
-        ):
+        for a1, a2 in zip(ax[-len(task.tgt_groups) :], ax[len(task.stim_groups) :]):
             a2.sharey(a1)
             a1.set_ylabel("rnn outputs")
             a2.set_ylabel("targets")
-        DriscollTasks.plot_session(
-            block_data[ibl], session=session, ax=ax, legend=True
-        )
+        DriscollTasks.plot_session(block_data[ibl], session=session, ax=ax, legend=True)
         _pred = test_preds[best_step][ibl][[session]]
         # arrange axes for plot_session to only plot outputs (which it thinks are targets)
-        _predax = [None] * len(task.stim_groups) + ax[
-            -len(task.tgt_groups) :
-        ].tolist()
+        _predax = [None] * len(task.stim_groups) + ax[-len(task.tgt_groups) :].tolist()
         DriscollTasks.plot_session(task, y=_pred, session=0, ax=_predax, legend=False)
-        _lbl = f"{ibl} {task.short_name if hasattr(task, 'short_name') else task.__name__}"
+        _lbl = (
+            f"{ibl} {task.short_name if hasattr(task, 'short_name') else task.__name__}"
+        )
         ax[0].set_title(_lbl, fontsize=8)
     return bigfig
+
+
+# ----- Generate and save plots
+
+if not output_dir.exists():
+    output_dir.mkdir(parents=True)
+    print(f"Warning: created output directory {output_dir}")
+net_filename = rnn_path.name
+if net_filename.endswith(".pt"):
+    net_filename = net_filename[:-3]
+output_dir = output_dir / net_filename
+output_dir.mkdir(parents=True, exist_ok=True)
+
+
+finalize_kw = dict(path=output_dir, transparent=True)
+plotter.finalize(plot_loss(), f"loss_{rnn_hash}", **finalize_kw)
+plotter.finalize(plot_blockwise_loss(), f"blockloss_{rnn_hash}", **finalize_kw)
+plotter.finalize(plot_block_examples(), f"ex_{rnn_hash}", **finalize_kw)
