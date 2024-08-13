@@ -947,6 +947,54 @@ class DriscollTasks:
             **driscoll_two_angle,
         }
 
+    class ResponsePro(MemoryPro):
+        """
+        Simple reaction task to response cue
+
+        .  o  .  fixation
+        .  .  o  response
+        .  .  .  x y (stim)
+        .  .  o  x y (target)
+        it co re
+        """
+
+        name = 'ResponsePro'
+        short_name = 'resppro'
+        n_period = 3
+        periods = ["iti", "context", "response"]
+        angles = []
+        flag_ixs = [0, 1]
+        stim_names = ["fixation", "response", "x", "y"]
+        tgt_names = ["x", "y"]
+        stim_groups = [[0, 1], [2, 3]]
+        tgt_groups = [[0, 1]]
+        xcolors = [getc("k"), getc("grey"), getc("tab20b:17"), getc("tab20b:19")]
+        ycolors = [getc("tab20c:0"), getc("tab20c:2")]
+        iti_stim = [0, 0, 0, 0]
+        default_params = {
+            **driscoll_one_stim,
+            **driscoll_one_angle,
+        }
+
+        @classmethod
+        def _generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
+            """
+            See DriscollTask.generate
+            """
+            # generate stimuli and targets for each period
+            stim = np.zeros((self.n_period, self.n_stim))
+            tgt = np.zeros((self.n_period, self.n_tgt))
+            stim[1, 0] = 1
+            stim[2, 1] = 1
+            tgt[4] = 1
+            return stim, tgt
+
+        @classmethod
+        def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
+            stim, tgt = self._generate(params, trial_info)
+            return DriscollTasks.expand_periods(trial_info, stim, tgt)
+
+
         
 
     

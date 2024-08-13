@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from collections.abc import Iterable
+import scipy.stats
 import tqdm
 import dill
 
@@ -60,12 +61,18 @@ class SignedLinear(nn.Module):
     def _weight(self):
         return (self.sign * self.scale) * (self.weight**2) * self.mask
 
+
 class LowRankLinear(nn.Module):
-    def __init__(self, n, n_out=None, rank=1, bias=False):
+    def __init__(self, n, n_out=None, rank=1, bias=False, init="xavier"):
         super().__init__()
         self.n_in = n
         self.n_out = n if n_out is None else n_out
         self.rank = rank
+        self.init = init
+        assert self.init in [
+            "xavier",
+            "ortho-inv",
+        ], "Only 'xavier' and 'ortho-inv' supported."
 
         self.v = nn.Parameter(th.Tensor(self.n_in, self.rank))
         self.u = nn.Parameter(th.Tensor(self.n_out, self.rank))
@@ -76,16 +83,25 @@ class LowRankLinear(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        W = th.empty(self.n_out, self.n_in)
-        nn.init.xavier_uniform_(W)
-        with th.no_grad():
-            u, s, v = th.svd(W)
-            # truncate to self.rank
-            self.u.set_(u[:, : self.rank])
-            self.v.set_(v[:, : self.rank])
-
+        if self.init == "xavier":
+            W = th.empty(self.n_out, self.n_in)
+            nn.init.xavier_uniform_(W)
+            with th.no_grad():
+                u, s, v = th.svd(W)
+                # truncate to self.rank
+                self.u.set_(u[:, : self.rank])
+                self.v.set_(v[:, : self.rank])
+        elif self.init == 'ortho-inv':
+            with th.no_grad():
+                s_ = th.rand(())
+                seed = abs(int(s_ * (2 ** 32 - 1)))
+                v = scipy.stats.ortho_group.rvs(self.n_in, random_state=seed)
+                self.v.set_(th.tensor(v[:, :self.rank], dtype=th.float32))
+                W = scipy.stats.ortho_group.rvs(self.rank, random_state=seed+1)
+                u = v[:, :self.rank] @ W
+                self.u.set_(th.tensor(u, dtype=th.float32))
         if self.bias is not None:
-            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(W)
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self._weight())
             bound = 1 / (fan_in**0.5) if fan_in > 0 else 0
             nn.init.uniform_(self.bias, -bound, bound)
 
@@ -103,7 +119,7 @@ class LowRankLinear(nn.Module):
         # W = self._weight()
         # return nn.functional.linear(input, W, self.bias)
         return (input @ self.v) @ self.u.T + self.bias
-    
+
     def _weight(self):
         """
         Returns
@@ -322,6 +338,7 @@ class BasicRNN_LR(nn.Module):
         act_ofs=0,
         bias=False,
         rank=1,
+        init="xavier",
     ):
         """
 
@@ -344,6 +361,12 @@ class BasicRNN_LR(nn.Module):
             Whether to include bias terms in the linear layers.
         rank : int
             The rank of the weight matrix.
+        init : str
+            The initialization method for the weight matrix. Only 'xavier'
+            and 'ortho-inv' suported. 'ortho' set the weight matrix to a
+            low-rank truncated Xavier initialization. 'ortho-inv' chooses
+            random orthogonal decoder vectors (v.T) and sets encoder vectors (u)
+            such that $v.t @ u
 
         """
         nn.Module.__init__(self)
@@ -352,9 +375,10 @@ class BasicRNN_LR(nn.Module):
         assert self.w_scale == 1, "Only w_scale == 1 supported."
         assert self.act_ofs == 0, "Only act_ofs == 0 supported."
         self.rank = int(rank)
+        self.init = init
 
         self.i2h = nn.Linear(self.nx, self.nh, bias=bias)
-        self.h2h = LowRankLinear(self.nh, self.nh, self.rank, bias=bias)
+        self.h2h = LowRankLinear(self.nh, self.nh, self.rank, bias=bias, init=self.init)
         self.h2y = nn.Linear(self.nh, self.ny, bias=bias)
         self.hbn = nn.LayerNorm(self.nh, elementwise_affine=False)
 
@@ -505,9 +529,8 @@ def fit_rnn(
                     "step": step,
                 }
             )
-        
 
-    ret = (losses),
+    ret = ((losses),)
     if lr is not None:
         ret += (np.array(lr_hist),)
     if checkpoint_every is not None:
