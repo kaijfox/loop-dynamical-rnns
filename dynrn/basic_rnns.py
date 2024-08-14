@@ -83,6 +83,7 @@ class LowRankLinear(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
+        # -- xavier initialization
         if self.init == "xavier":
             W = th.empty(self.n_out, self.n_in)
             nn.init.xavier_uniform_(W)
@@ -91,15 +92,20 @@ class LowRankLinear(nn.Module):
                 # truncate to self.rank
                 self.u.set_(u[:, : self.rank])
                 self.v.set_(v[:, : self.rank])
+        # -- orthogonal inverse initialization
         elif self.init == 'ortho-inv':
             with th.no_grad():
                 s_ = th.rand(())
                 seed = abs(int(s_ * (2 ** 32 - 1)))
                 v = scipy.stats.ortho_group.rvs(self.n_in, random_state=seed)
                 self.v.set_(th.tensor(v[:, :self.rank], dtype=th.float32))
-                W = scipy.stats.ortho_group.rvs(self.rank, random_state=seed+1)
+                if self.rank == 1:
+                    W = th.tensor([[1.]], dtype=th.float32)
+                else:
+                    W = scipy.stats.ortho_group.rvs(self.rank, random_state=seed+1)
                 u = v[:, :self.rank] @ W
                 self.u.set_(th.tensor(u, dtype=th.float32))
+        # -- bias initialization
         if self.bias is not None:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self._weight())
             bound = 1 / (fan_in**0.5) if fan_in > 0 else 0
@@ -692,7 +698,7 @@ def timehash(unique_within=False, ext=".*", max_suffix=1000):
             find_hash(unique_within, unique_hextime, ext=ext, silent=True) is not None
             and i < max_suffix
         ):
-            unique_hextime = f"{hextime}.{str(hex(i)).lstrip('0x')}"
+            unique_hextime = f"{hextime}.{str(hex(i))[2:]}"
             i += 1
         if i > max_suffix - 1:
             raise ValueError(

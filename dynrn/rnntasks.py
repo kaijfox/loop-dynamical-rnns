@@ -251,13 +251,13 @@ driscoll_two_angle = {
 def _driscoll_invert_target(self, params, trial_info):
     stim, tgt = self._generate(params, trial_info)
     tgt[-1] = -tgt[-1]
-    return stim, tgt
+    return DriscollTasks.expand_periods(trial_info, stim, tgt)
 
 
 def _driscoll_reverse_target(self, params, trial_info):
     stim, tgt = self._generate(params, trial_info)
     tgt[-1] = tgt[-1, ::-1]
-    return stim, tgt
+    return DriscollTasks.expand_periods(trial_info, stim, tgt)
 
 def _dict_subset(d, keys, new_key = lambda k: k):
     return {new_key(k): d[k] for k in keys}
@@ -492,6 +492,27 @@ class DriscollTasks:
         params: dict = {},
         seed: int = 0,
     ) -> "DriscollTasks.SingleTaskDataset":
+        """
+        Generate a dataset of sessions for a task.
+
+        Parameters
+        ----------
+        task : DriscollTask
+            The task to simulate sessions for.
+        n_sessions : int
+            The number of sessions to generate.
+        session_length : int
+            The length of each session.
+        params : dict
+            The parameters for the task.
+        seed : int
+            The random seed for reproducibility.
+
+        Returns
+        -------
+        dataset : SingleTaskDataset
+            A dataset of sessions for the task.
+        """
         params = {**task.default_params, **params}
         stimuli = np.zeros((n_sessions, session_length, task.n_stim))
         targets = np.zeros((n_sessions, session_length, task.n_tgt))
