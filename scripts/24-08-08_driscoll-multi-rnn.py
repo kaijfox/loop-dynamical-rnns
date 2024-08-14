@@ -92,14 +92,16 @@ if network_type == "lnrnn" or network_type == "lr":
             act="Softplus",
             bias=True,
             nh=1024,
-            rank=1, # only accessed if network_type == "lr"
+            # only accessed if network_type == "lr"
+            rank=1,
+            init="ortho-inv",
         ),
         **network_args,
     }
     args["act"] = getattr(nn, args["act"])()
-    lr_kws = dict(rank=args["rank"]) if network_type == "lr" else {}
+    lr_kws = dict(rank=args["rank"], init=args["init"]) if network_type == "lr" else {}
     NetClass = rnns.BasicRNN_LN if network_type == "lnrnn" else rnns.BasicRNN_LR
-    
+
     # Define and initialize
     th.manual_seed(0)
 
@@ -159,7 +161,7 @@ for i_net in range(train_args["n"]):
         print(f"Continuing from checkpoint: {train_args['cont']}")
     else:
         continue_hash = None
-        first_step=0
+        first_step = 0
 
     # -------- Saving
 
@@ -188,9 +190,7 @@ for i_net in range(train_args["n"]):
             losses=(
                 fitdata["losses"]
                 if train_args["cont"] is None
-                else np.concatenate(
-                    [c_traindata["losses"], fitdata["losses"]], axis=-1
-                )
+                else np.concatenate([c_traindata["losses"], fitdata["losses"]], axis=-1)
             ),
         ),
         print(f"Saved RNN model: {rnn_path}"),

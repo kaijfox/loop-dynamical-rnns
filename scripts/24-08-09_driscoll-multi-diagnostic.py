@@ -71,8 +71,6 @@ final_rnn, rnn_ckpts, traindata = rnns.load_rnn(rnn_path, device=device)
 
 task_data_hash = traindata["dataset_hash"]
 task_data = dill.load(open(find_hash(root_dir, task_data_hash, ".dil"), "rb"))
-task_meta_hash = traindata["task_hash"]
-task_meta = dill.load(open(find_hash(root_dir, task_meta_hash, ".dil"), "rb"))
 
 
 # -------- Evalutate loss / predictions on test data
@@ -84,12 +82,12 @@ test_preds = {}
 test_losses = {}
 
 x = th.tensor(test_data["stimuli"], dtype=th.float32).to(device)
-h_init = th.zeros([x.shape[0], final_rnn.nh])
+h_init = th.zeros([x.shape[0], final_rnn.nh]).to(device)
 for step, rnn in tqdm.tqdm(rnn_ckpts.items()):
     all_preds, all_h = rnn.seq_forward(x, h_init)
-    test_losses[step] = (all_preds.detach() - test_data["targets"]) ** 2
+    test_losses[step] = (all_preds.cpu().detach() - test_data["targets"]) ** 2
     test_preds[step] = [
-        all_preds[slc][:n_ex_session].detach().numpy() for slc in test_data["block_slices"]
+        all_preds[slc][:n_ex_session].cpu().detach().numpy() for slc in test_data["block_slices"]
     ]
 
 # ----- Generate and save plots
