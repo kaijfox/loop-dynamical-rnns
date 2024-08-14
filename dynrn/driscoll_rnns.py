@@ -119,3 +119,122 @@ def plot_block_examples(test_data, test_losses, test_preds, session=0):
         ax[0].set_title(_lbl, fontsize=8)
     return bigfig
 
+
+
+def lowrank_space(rnn: rnns.BasicRNN_LR):
+    """
+    Projections to and from the input span of a low-rank RNN.
+
+    The low-rank (i.e. decoder) space is the the null-space complement of $W$.
+    When $W = UV^T$, this can be parameterized by the pseudoinverse of $V$, but
+    it can be more convenient to to parameterize it by the SVD $W = Q \Sigma
+    P^T$, which can be thought of as defining an equivalent low rank network
+    that only varies original in its encoder / decoder spaces.
+
+    Parameters
+    ----------
+    rnn : rnns.BasicRNN_LR
+        Low-rank RNN, with low rank decoder weights rnn.h2h.v, having shape
+        (n_hidden, rank)
+    
+    Returns
+    -------
+    down : np.ndarray, shape (rank, n_hidden)
+        Projection from hidden activations to equivalent orthogonal decoder
+        space of the low-rank RNN
+    up : np.ndarray, shape (n_hidden, rank)
+        Projection from equivalent orthogonal decoder space to hidden
+        activations
+    encoder : np.ndarray, shape (n_hidden, rank)
+        Encoder weights for the equivalent orthogonal low rank network.
+    """
+    # SVD of the decoder weights
+    Q, s, Pt = th.linalg.svd(rnn.h2h.u @ rnn.h2h.v.T,)
+    P = Pt.T
+    Q = Q[:, :rnn.rank]
+    s = s[:rnn.rank]
+    P = P[:, :rnn.rank]
+    # the orthogonal encoder weights
+    encoder = Q @ th.diag(s)
+    # the projection to the low-rank space
+    down = P.T
+    # the projection from the low-rank space
+    up = P
+    return dict(
+        down = down.detach().cpu().numpy(),
+        up = up.detach().cpu().numpy(),
+        encoder = encoder.detach().cpu().numpy(),
+    )
+
+def _space_and_x_tensors(rnn, space, x, n_samples):
+    """Convert args to tensor if necessary."""
+
+    if space is None:
+        space = lowrank_space(rnn)
+    if not th.is_tensor(space["down"]):
+        down = th.tensor(space["down"], dtype=th.float32)
+        up = th.tensor(space["up"], dtype=th.float32)
+        enc = th.tensor(space["encoder"], dtype=th.float32)
+    else:
+        down = space["down"]
+        up = space["up"]
+        enc = space["encoder"]
+
+    if isinstance(n_samples, int):
+        n_samples = (n_samples,)
+    if x is None:
+        x = th.zeros(n_samples + (rnn.nx,), dtype=th.float32)
+    elif not th.is_tensor(x):
+        x = th.tensor(x, dtype=th.float32)
+    
+    return down, up, enc, x
+
+def lowrank_step(h_low, rnn: rnns.BasicRNN_LR = None, space: dict = None, x = None):
+    """
+    Calculate motion within decoder space of a low-rank RNN.
+
+    Parameters
+    ----------
+    h_low : np.ndarray or th.tensor, shape (n_samples, rank)
+        Coordinates in decoder space, i.e. V^T output space.
+    rnn : rnns.BasicRNN_LR, optional
+        Low-rank RNN. Required only if `space` or `x` are not provided.
+    space : dict, optional
+        Dictionary containing the encoder, up, and down matrices for the low-rank
+        RNN as returned by `lowrank_space`. If not provided, these are
+        calculated from `rnn`.
+    x : np.ndarray or th.tensor, optional
+        Input to the RNN. If not provided, defaults to zeros.
+    """
+    
+
+    if not th.is_tensor(h_low):
+        h_low = th.tensor(h_low, dtype=th.float32)
+    down, up, _, x = _space_and_x_tensors(rnn, space, x, h_low.shape[:-1])
+
+    # --- compute next step activations
+    h = h_low @ up.T # (n_samples, n_hidden)
+    _, h_new = rnn.forward(x, h) # (n_samples, n_hidden)
+    h_low_new = h_new @ down.T # (n_samples, rank)
+
+    return h_low_new.detach().cpu().numpy()
+
+
+def lowrank_trajectories(rnn, n_traj, n_steps, h_rng, space = None, x = None, seed: int = 0):
+
+    rng = np.random.default_rng(seed)
+    down, up, _, x = _space_and_x_tensors(rnn, space, x, n_traj)
+    x = th.tile(x[:, None, :], (1, n_steps, 1))
+    h0_low = rng.uniform(*h_rng, size=(n_traj, rnn.rank))
+    h0_low = th.tensor(h0_low, dtype=th.float32)
+    h0 = h0_low @ up.T
+    
+    _, trajs = rnn.seq_forward(x, h0) # shape (n_traj, n_steps, n_hidden)
+    h_low = trajs @ down.T # shape (n_traj, n_steps, rank)
+    h_low = th.concat([h0_low[:, None, :], h_low], dim=1)
+
+    return h_low.detach().cpu().numpy()
+
+
+
+

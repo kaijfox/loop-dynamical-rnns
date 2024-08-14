@@ -4,7 +4,7 @@ __generated_with = "0.7.12"
 app = marimo.App(width="medium")
 
 
-@app.cell(hide_code=True)
+@app.cell
 def __(mo):
     mo.md(r"""### Setup""")
     return
@@ -510,7 +510,6 @@ def __(
     )
     trial_group_angles = np.array([trial_angles[group].mean() for group in trial_groups])
     trial_group_angle_colors = Colormap("matlab:cool")(trial_group_angles / np.pi * 4)
-
     return (
         trial_angle_colors,
         trial_angles,
@@ -618,13 +617,13 @@ def __(Colormap, np, period_colors, plotter, plt, trials, vd, vu):
                     tcolor = [
                         period_timepals[t["period"][i_per][i_win]] for t in trials
                     ][:plot_n]
-                    
+
                     gtdata = [t["pc_gt"][i_per][i_win][..., [0, y_pc], i_per] for t in trials][
                         :plot_n
                     ]
                     row = 2 * i_row
                     vd.trajecories(ax[row, i_per], gtdata, tcolor, color="both", lw=0.5, time_point=10)
-        
+
                     prdata = [t["pc_pr"][i_per][i_win][..., [0, y_pc], i_per] for t in trials][
                         :plot_n
                     ]
@@ -672,7 +671,7 @@ def __(
         for row, y_pc in enumerate([1, 2]):
             for i_win in range(3):
                 for i_per in range(5):
-        
+
                     # trial_avg array index t[key][i_phase][i_in_window][time, i_pc, i_pca]
                     tcolor = [
                         period_timepals[int(t["period"][i_per][i_win])]
@@ -683,7 +682,7 @@ def __(
                         for t in trial_group_avgs
                     ]
                     vd.trajecories(ax[row, i_per], tdata, tcolor, color="both", lw=0.5)
-        
+
                     vd.trajecories(ax[row+2, i_per], tdata, angle_timepal, color="both", lw=0.5)
 
                     ax[row, 0].set_ylabel(f"PC {y_pc}")

@@ -391,6 +391,21 @@ class BasicRNN_LR(nn.Module):
 
     @jit.export
     def forward(self, x, h):
+        """
+        Parameters
+        ----------
+        x : torch.Tensor, (batch_size, input_size)
+            The input tensor.
+        h : torch.Tensor, (batch_size, hidden_size)
+            The hidden state tensor.
+        
+        Returns
+        -------
+        y : torch.Tensor, (batch_size, output_size)
+            The output tensor.
+        h_new : torch.Tensor, (batch_size, hidden_size)
+            The new hidden state tensor.
+        """
         h_norm = self.hbn(h)
         I = self.h2h(h_norm) + self.i2h(x)
         fh = self.act(I)
@@ -400,6 +415,21 @@ class BasicRNN_LR(nn.Module):
 
     @jit.export
     def seq_forward(self, x, h):
+        """
+        Parameters
+        ----------
+        x : torch.Tensor, (batch_size, sequence_length, input_size)
+            The input sequence.
+        h : torch.Tensor, (batch_size, input_size)
+            The initial hidden state tensor.
+
+        Returns
+        -------
+        outputs : torch.Tensor, (batch_size, sequence_length, output_size).
+            Sequence of output unit activations
+        hidden_states : torch.Tensor, (batch_size, hidden_size)
+            Sequence of hidden state activations.
+        """
         y = []
         hs = []
         for i in range(x.shape[1]):
