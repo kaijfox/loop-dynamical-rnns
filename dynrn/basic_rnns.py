@@ -83,6 +83,7 @@ class LowRankLinear(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
+        print("lowrank initialization mode:", self.init)
         if self.init == "xavier":
             W = th.empty(self.n_out, self.n_in)
             nn.init.xavier_uniform_(W)
