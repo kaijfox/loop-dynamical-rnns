@@ -11,6 +11,7 @@ from sklearn.decomposition import PCA
 import tqdm
 import matplotlib.pyplot as plt
 from mplutil.nb import colorset
+from typing import Optional
 
 split_dataset = namedtuple("dataset", ['train', 'val'])
 activity_dataset = namedtuple(
@@ -57,6 +58,13 @@ n_session : int
 metadata : dict
     Metadata or keyword arguments for to generate the stimuli and targets.
 """
+
+class MultiBlockActivityDataset(DriscollTasks.MultiTaskBlockDataset):
+    activity: np.ndarray
+    n_act: int
+    pca: Optional[PCA]
+
+
 
 
 
@@ -329,6 +337,75 @@ def create_memorypro_activity_dataset(
             **meta
         )
     )
+
+
+def evaluate_multiblock_activity(
+    rnn,
+    pca_set: str = None,
+    n_dim:int = 40,
+    apply_pca: bool=True,
+    **kws
+):
+    """
+    Generate embeddings of hidden trajectories from `memorypro` task.
+
+    Parameters
+    ----------
+    rnn : nn.Module
+        The RNN model. Should have a function `seq_forward` taking input and
+        initial hidden state tensors.
+    n_dim : int
+        Number of dimensions to reduce the hidden state to. A nonpositive value
+        indicated no reduction.
+    apply_pca : bool
+        Whether to apply PCA to the hidden state, assumed true if `n_dim` is
+        positive.
+    pca_set : str
+        Which dataset to use for training PCA.
+    kws : dict[str, DriscollTasks.MultiTaskBlockDataset]
+        Datasets to generate activity for.
+    """
+
+    sets = list(kws.keys())
+    sets = [pca_set] + [s for s in sets if s != pca_set]
+    pca = None
+    ret = {}
+    for set_name, dataset in sets:
+        
+        # run model on stimuli to generate hidden trajectories
+        x = th.tensor(dataset.stim, dtype=th.float32)
+        device = next(rnn.parameters()).device
+        h_init = th.zeros(x.shape[0], rnn.nh)
+        _, h = rnn.seq_forward(x.to(device), h_init.to(device))
+
+        # optionally compress hidden trajectories
+        apply_pca = apply_pca or n_dim > 0
+        if apply_pca:
+            if set_name == pca_set:
+                if n_dim < 0:
+                    n_dim = h.shape[-1]
+                pca = PCA(n_components=n_dim)
+                h_reduced = pca.fit_transform(
+                    h.detach().cpu().numpy().reshape(-1, h.shape[-1])
+                ).reshape(h.shape[:-1] + (n_dim,))
+            else:
+                h_reduced = pca.transform(
+                    h.detach().cpu().numpy().reshape(-1, h.shape[-1])
+                ).reshape(h.shape[:-1] + (n_dim,))
+        else:
+            h_reduced = h.detach().cpu().numpy()
+            n_dim = h.shape[-1]
+        
+        # Embed in dataset structure and return
+        ret[set_name] = MultiBlockActivityDataset(
+            **dataset,
+            activity=h_reduced,
+            n_act=n_dim,
+            pca=pca
+        )
+    return ret
+
+    
 
 def plot_memorypro_prediction(
     losses,

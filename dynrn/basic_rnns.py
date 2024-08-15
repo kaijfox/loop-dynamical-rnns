@@ -750,6 +750,15 @@ def find_hash(root, hash, ext=".*", silent=False):
     return results[0]
 
 
+def gitinfo(filepath):
+    import git
+    repo = git.Repo(filepath, search_parent_directories=True)
+    commit = repo.head.commit.hexsha
+    msg = repo.head.commit.message.splitlines()[0]
+    patch = repo.git.diff()
+    return {"commit": commit, "msg": msg, "patch": patch}
+
+
 def hash_or_path(path_str, ext=".*", sep=":"):
     """
     Resolve <root><sep><hash> or <path> format to filepath.
