@@ -158,10 +158,12 @@ for i_net in range(train_args["n"]):
         opt_state = rnns._dict_to(c_traindata["opt_state"], device)
         opt.load_state_dict(opt_state)
         first_step = c_traindata.get("step", -1) + 1
-        print(f"Continuing from checkpoint: {train_args['cont']}")
+        print(f"Continuing from checkpoint: {train_args['cont']}, step {first_step}")
     else:
         continue_hash = None
         first_step = 0
+
+    print("training first_step", first_step)
 
     # -------- Saving
 

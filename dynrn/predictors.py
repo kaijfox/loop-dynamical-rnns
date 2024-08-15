@@ -12,8 +12,9 @@ import tqdm
 import matplotlib.pyplot as plt
 from mplutil.nb import colorset
 from typing import Optional
+from mplutil import util as vu
 
-split_dataset = namedtuple("dataset", ['train', 'val'])
+split_dataset = namedtuple("dataset", ["train", "val"])
 activity_dataset = namedtuple(
     "activity_dataset",
     [
@@ -59,18 +60,23 @@ metadata : dict
     Metadata or keyword arguments for to generate the stimuli and targets.
 """
 
+
 class MultiBlockActivityDataset(DriscollTasks.MultiTaskBlockDataset):
     activity: np.ndarray
     n_act: int
     pca: Optional[PCA]
 
 
-
-
-
 def save_dsn(
-    model_path, model, dataset, gamma, cumulant_fn, checkpoints=None, losses=None
-): 
+    model_path,
+    model,
+    dataset,
+    gamma,
+    cumulant_fn,
+    checkpoints=None,
+    losses=None,
+    source_meta={},
+):
     """
     Write three files to disk:
     {model_path}.tar:
@@ -84,14 +90,14 @@ def save_dsn(
     """
     th.save(
         {
-            'state_dict': model.state_dict(),
-            'checkpoints': (
+            "state_dict": model.state_dict(),
+            "checkpoints": (
                 {i: m.state_dict() for i, m in checkpoints.items()}
                 if checkpoints is not None
                 else checkpoints
-            )
+            ),
         },
-        f"{model_path}.tar"
+        f"{model_path}.tar",
     )
     jit.save(model, f"{model_path}.pt")
     dill.dump(
@@ -99,10 +105,12 @@ def save_dsn(
             "dataset": dataset,
             "cumulant_fn": cumulant_fn,
             "losses": losses,
-            "gamma": gamma
+            "gamma": gamma,
+            **source_meta,
         },
         open(f"{model_path}.train.dil", "wb"),
     )
+
 
 def load_dsn(model_path, device=None):
     """
@@ -112,13 +120,13 @@ def load_dsn(model_path, device=None):
     ----------
     model_path : str
         Path to the model file, without the extension, or with extension '.pt'.
-    
+
     Returns
     -------
     model : nn.Module
     ckpts : dict of nn.Module
     train_data : dict
-        Contining 
+        Contining
         - `'dataset'`: task context and activity data that the model was trained
           on.
         - `'cumulant_fn'`: function for generating cumulant from dataset.train
@@ -127,13 +135,13 @@ def load_dsn(model_path, device=None):
         - `'gamma'`: Discount value.
     """
     model_path = str(model_path)
-    if model_path.endswith('.pt'):
+    if model_path.endswith(".pt"):
         model_path = model_path[:-3]
     model = jit.load(f"{model_path}.pt", map_location=device)
     params = th.load(f"{model_path}.tar", map_location=device)
-    model.load_state_dict(params['state_dict'])
-    ckpts = {i: copy.deepcopy(model) for i in params['checkpoints']}
-    for i, c in params['checkpoints'].items():
+    model.load_state_dict(params["state_dict"])
+    ckpts = {i: copy.deepcopy(model) for i in params["checkpoints"]}
+    for i, c in params["checkpoints"].items():
         ckpts[i].load_state_dict(c)
     train_data = dill.load(open(f"{model_path}.train.dil", "rb"))
     return model, ckpts, train_data
@@ -202,14 +210,14 @@ def fit_dsn(
     return ret
 
 
-def td_loss(prediction, cumulant, gamma, loss_fn = nn.MSELoss()):
+def td_loss(prediction, cumulant, gamma, loss_fn=nn.MSELoss()):
     """
     For a black box differentiable function F(x) and sequence data
     $x_t\in\mathbb{R}^n$, $y_t\in\mathbb{R}^m$, minimize the objective
     $L = ||y_{t->t+1} + gamma * F(x_{t+1}) - F(x_t)||^2$
     if `loss_fn` is nn.MSELoss(), or more generally minimize
     $L = loss_fn(y_{t+1} + gamma * F(x_{t+1}), F(x_t)).$
-    
+
     Parameters
     ----------
     prediction : shape (..., n_time, n_dim)
@@ -229,33 +237,32 @@ def discounted_sums(x, gamma):
     x : array, shape (.., n_samples)
     gamma : float
     """
-    if th.is_tensor(x): m = th
-    else: m = np
+    if th.is_tensor(x):
+        m = th
+    else:
+        m = np
     T = x.shape[-1]
     gamma = gamma ** m.arange(T)
-    return m.stack([
-        (x[..., i:] * gamma[:T-i]).sum(axis = -1)
-        for i in range(T)
-    ], axis = -1)
-    
-
+    return m.stack(
+        [(x[..., i:] * gamma[: T - i]).sum(axis=-1) for i in range(T)], axis=-1
+    )
 
 
 def create_memorypro_activity_dataset(
     model,
-    n_dim = 40,
-    n_train = 200,
-    n_val = 50,
-    seed_train = 1,
-    seed_val = 2,
-    session_length = 500,
+    n_dim=40,
+    n_train=200,
+    n_val=50,
+    seed_train=1,
+    seed_val=2,
+    session_length=500,
     apply_pca=True,
-    task_kws = {}
+    task_kws={},
 ):
     """
     Generate embeddings of hidden trajectories from `memorypro` task.
 
-    
+
     """
 
     # generate task stimuli for training and validation sessions
@@ -266,7 +273,7 @@ def create_memorypro_activity_dataset(
                 session_length=session_length,
                 n_sessions=n_train,
                 seed=seed_train,
-            )
+            ),
         }
     )
     x = th.tensor(x, dtype=th.float32)
@@ -279,7 +286,7 @@ def create_memorypro_activity_dataset(
                 session_length=500,
                 n_sessions=n_val,
                 seed=seed_val,
-            )
+            ),
         }
     )
     xv = th.tensor(xval, dtype=th.float32)
@@ -317,10 +324,10 @@ def create_memorypro_activity_dataset(
         n_period=periods.max() + 1,
         n_act=n_dim,
         session_length=x.shape[1],
-        metadata={'task_kws': task_kws, 'pca': pca},
+        metadata={"task_kws": task_kws, "pca": pca},
     )
     return split_dataset(
-        train = activity_dataset(
+        train=activity_dataset(
             stim=x,
             targets=y,
             periods=periods,
@@ -328,23 +335,19 @@ def create_memorypro_activity_dataset(
             n_session=x.shape[0],
             **meta,
         ),
-        val = activity_dataset(
+        val=activity_dataset(
             stim=xv,
             targets=yv,
             periods=periodsval,
             activity=xh_val,
             n_session=xv.shape[0],
-            **meta
-        )
+            **meta,
+        ),
     )
 
 
 def evaluate_multiblock_activity(
-    rnn,
-    pca_set: str = None,
-    n_dim:int = 40,
-    apply_pca: bool=True,
-    **kws
+    rnn, pca_set: str = None, n_dim: int = 40, apply_pca: bool = True, **kws
 ):
     """
     Generate embeddings of hidden trajectories from `memorypro` task.
@@ -373,9 +376,9 @@ def evaluate_multiblock_activity(
     for set_name in sets:
         dataset: DriscollTasks.MultiTaskBlockDataset = kws[set_name]
         print("Applying to set", set_name)
-        
+
         # run model on stimuli to generate hidden trajectories
-        x = th.tensor(dataset['stimuli'], dtype=th.float32)
+        x = th.tensor(dataset["stimuli"], dtype=th.float32)
         device = next(rnn.parameters()).device
         h_init = th.zeros(x.shape[0], rnn.nh)
         _, h = rnn.seq_forward(x.to(device), h_init.to(device))
@@ -398,17 +401,13 @@ def evaluate_multiblock_activity(
         else:
             h_reduced = h.detach().cpu().numpy()
             n_dim = h.shape[-1]
-        
+
         # Embed in dataset structure and return
         ret[set_name] = MultiBlockActivityDataset(
-            **dataset,
-            activity=h_reduced,
-            n_act=n_dim,
-            pca=pca
+            **dataset, activity=h_reduced, n_act=n_dim, pca=pca
         )
     return ret
 
-    
 
 def plot_memorypro_prediction(
     losses,
@@ -420,7 +419,7 @@ def plot_memorypro_prediction(
     xcolors=None,
     ycolors=None,
     session=0,
-    colors=None
+    colors=None,
 ):
     if xcolors is None:
         xcolors = DriscollPlots.memorypro_xcolors
@@ -467,7 +466,7 @@ def plot_memorypro_prediction(
                 xcolors=xcolors,
                 ycolors=ycolors,
                 single_ax=True,
-                flags=False
+                flags=False,
             )
             if r == 1:
                 ax[r, i + 1].twinx().plot(
@@ -477,6 +476,7 @@ def plot_memorypro_prediction(
                 )
 
     return fig, ax
+
 
 def plot_memorypro_dsn_prediction(
     losses,
@@ -492,13 +492,10 @@ def plot_memorypro_dsn_prediction(
     steps = checkpoints.keys()
     with th.no_grad():
         ckpt_yhats = {
-            i: checkpoints[i].cpu()(val_dataset.activity.cpu()).detach()
-            for i in steps
+            i: checkpoints[i].cpu()(val_dataset.activity.cpu()).detach() for i in steps
         }
     ckpt_preds = {i: y[..., plot_units].numpy() for i, y in ckpt_yhats.items()}
-    ckpt_loss = {
-        i: td_loss(y, cumulant, gamma, loss_fn) for i, y in ckpt_yhats.items()
-    }
+    ckpt_loss = {i: td_loss(y, cumulant, gamma, loss_fn) for i, y in ckpt_yhats.items()}
     manual_sums = discounted_sums(
         cumulant[..., plot_units].transpose(2, 1), gamma
     ).transpose(2, 1)
@@ -515,3 +512,126 @@ def plot_memorypro_dsn_prediction(
     ax[0, 0].set_yscale("log")
 
     return fig, ax
+
+
+def create_predictor_network(net_type, net_args, n_act):
+    """
+    Generate a function returning an nn.Module for predicting discounted sums.
+
+    The valid network types and their parameters are:
+    - 'softplus': a feedforward network with softplus activations and layer
+      normalization.
+        - widths, list of two ints: the number of hidden units in nonlinear
+          layer
+    - 'bottle-softplus': a feedforward network with softplus activations and layer
+        normalization, and an initial linear bottleneck.
+        - widths, list of two ints: the number of hidden units in nonlinear layer
+        - bottleneck, int: the number of units in the bottleneck layer
+
+    Parameters
+    ----------
+    net_type : str
+        The type of network to generate. Options are:
+        - 'softplus': a feedforward network with softplus activations.
+    net_args : dict
+        Arguments to pass to the network function, described above.
+    n_act : int
+        The number of input and output dimensions.
+    """
+
+    if net_type == "bottle-softplus":
+        net_args = {**dict(widths=[], bottleneck=-1), **net_args}
+        widths = net_args["widths"]
+        if len(widths) != 2:
+            raise ValueError(
+                f"`widths` network argument must" " be a list of length 2, got {widths}"
+            )
+        if net_args["bottleneck"] < 0:
+            raise ValueError(f"`bottleneck` network argument required")
+        create_model = lambda: nn.Sequential(
+            nn.Linear(n_act, net_args["bottleneck"]),
+            nn.Linear(net_args["bottleneck"], widths[0]),
+            nn.Softplus(),
+            nn.LayerNorm(widths[0]),
+            nn.Linear(widths[0], widths[1]),
+            nn.Softplus(),
+            nn.Linear(widths[1], n_act),
+        )
+
+    elif net_type == "softplus":
+        net_args = {
+            **dict(
+                widths=[],
+            ),
+            **net_args,
+        }
+        widths = net_args["widths"]
+        if len(widths) != 2:
+            raise ValueError(
+                f"`widths` network argument must" " be a list of length 2, got {widths}"
+            )
+        create_model = lambda: nn.Sequential(
+            nn.Linear(n_act, widths[0]),
+            nn.Softplus(),
+            nn.LayerNorm(widths[0]),
+            nn.Linear(widths[0], widths[1]),
+            nn.Softplus(),
+            nn.Linear(widths[1], n_act),
+        )
+
+    else:
+        raise ValueError(f"Invalid network type: {net_type}")
+
+    return create_model
+
+
+def plot_block_error_examples(
+    test_data, cumul_gt, test_losses, test_preds, n_unit=2, session=0
+):
+    """
+    Parameters
+    ----------
+    test_data : DriscollTasks.MultiTaskBlockDataset
+    test_losses : dict[int, array shape (n_sess, session_len, n_act)]
+    test_preds : dict[int, array shape (n_sess, session_len, n_act)]
+    """
+    n_blocks = len(test_data["block_slices"])
+    block_data = DriscollTasks.split_dataset(test_data)
+
+    bigfig, figs, _ = vu.flat_subfig_grid(n_blocks, 5, (4, (n_unit + 1) * 0.75))
+    for ibl in range(n_blocks):
+        fig = figs[ibl]
+        task: DriscollTasks.DriscollTask = block_data[ibl]["task"]
+        block: DriscollTasks.SingleTaskDataset = block_data[ibl]
+        steps = np.array(sorted(list(test_preds.keys())))
+        plot_step = steps[-1]
+        _, ax, _ = vu.flat_grid((n_unit + 1), 1, ax_size=None, fig=fig, sharex=True)
+
+        DriscollTasks.plot_session(
+            task, periods=block["periods"], session=session, ax=ax
+        )
+        x = np.arange(1, block["session_length"])
+        slc = test_data["block_slices"][ibl]
+        block_loss = test_losses[plot_step][slc]
+        block_preds = test_preds[plot_step][slc]
+        ax[0].plot(
+            x,
+            block_loss[session].mean(axis=-1),
+            color="C0",
+            lw=1,
+        )
+        for i in range(n_unit):
+            ax[i + 1].plot(
+                x,
+                block_preds[session, :, i],
+                color="C3",
+                lw=1,
+            )
+            ax[i + 1].plot(
+                x,
+                cumul_gt[session, :, i],
+                color="k",
+                lw=1,
+            )
+
+    return bigfig

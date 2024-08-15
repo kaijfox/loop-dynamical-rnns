@@ -558,6 +558,7 @@ def fit_rnn(
         if checkpoint_every is not None and i % checkpoint_every == 0:
             ckpts[step] = copy.deepcopy(rnn).cpu()
         if save_fn is not None and i % save_every == 0:
+            print("saving network with step", step)
             save_fn(
                 {
                     "model": rnn,
