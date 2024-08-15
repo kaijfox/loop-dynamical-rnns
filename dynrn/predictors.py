@@ -370,10 +370,12 @@ def evaluate_multiblock_activity(
     sets = [pca_set] + [s for s in sets if s != pca_set]
     pca = None
     ret = {}
-    for set_name, dataset in sets:
+    for set_name in sets:
+        dataset: DriscollTasks.MultiTaskBlockDataset = kws[set_name]
+        print("Applying to set", set_name)
         
         # run model on stimuli to generate hidden trajectories
-        x = th.tensor(dataset.stim, dtype=th.float32)
+        x = th.tensor(dataset['stimuli'], dtype=th.float32)
         device = next(rnn.parameters()).device
         h_init = th.zeros(x.shape[0], rnn.nh)
         _, h = rnn.seq_forward(x.to(device), h_init.to(device))
@@ -384,6 +386,7 @@ def evaluate_multiblock_activity(
             if set_name == pca_set:
                 if n_dim < 0:
                     n_dim = h.shape[-1]
+                print(f"fitting pca to {n_dim} components")
                 pca = PCA(n_components=n_dim)
                 h_reduced = pca.fit_transform(
                     h.detach().cpu().numpy().reshape(-1, h.shape[-1])

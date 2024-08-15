@@ -2,7 +2,7 @@
 Diagnostic plots for block-style driscoll tasks from `driscoll-multi-rnn.py`.
 
 Usage:
-    <root_dir> <rnn_hash> <n_train> <n_test> <session_length> <base_seed> <output_fmt>
+    <root_dir> <task_hash> <n_train> <n_test> <session_length> <base_seed> <output_fmt>
 
 Args:
 root_dir: str
@@ -18,7 +18,7 @@ base_seed: int
     seed for the random number generator
 output_fmt: str
     path to save the model within the root, can contain a substring `{hash}` to
-    insert a time-based hash.
+    insert a time-based hash. Ending with ".dil"
 """
 
 import torch as th
@@ -73,14 +73,14 @@ n_train = int(sys.argv[3])
 n_test = int(sys.argv[4])
 length = int(sys.argv[5])
 seed = int(sys.argv[6])
-output_fmt = Path(sys.argv[7])
+output_fmt = sys.argv[7]
 
 
 # -------- Load task metadata and sample stimuli / targets
 
 task_kws = dill.load(open(find_hash(root_dir, task_hash, ".dil"), "rb"))
 
-print(task_kws)
+
 battery = task_kws.keys()
 rng = np.random.default_rng(seed=seed)
 seeds = rng.integers(0, 2**32 - 1, (2, len(battery)), dtype=np.uint32)
@@ -93,19 +93,20 @@ multitask = lambda n_sess, sess_len, seeds: DriscollTasks.merge_datasets(
 )
 dataset = {
     "train": multitask(n_train, length, seeds[0]),
-    "test": multitask(n_train, length, seeds[1]),
+    "test": multitask(n_test, length, seeds[1]),
 }
 
 
 # ------ Save out simulated trajectories
 
-dset_hash = timehash(unique_within=root_dir, ext=".pt")
+dset_hash = timehash(unique_within=root_dir, ext=".dil")
 dset_path = root_dir / output_fmt.format(hash=dset_hash)
 
 dill.dump(
     {
         **dataset,
         "task_hash": task_hash,
+        "seeds": {'train': seeds[0], 'test': seeds[1]},
     },
     open(dset_path, "wb"),
 )

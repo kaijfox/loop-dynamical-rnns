@@ -17,7 +17,7 @@ n_dims: int or str
     applied but at full dimensionality. If 'units' no reduction will be applied.
 output_fmt: str
     path to save the model within the root, can contain a substring `{hash}` to
-    insert a time-based hash.
+    insert a time-based hash. Ending with ".dil"
 """
 
 import torch as th
@@ -70,7 +70,7 @@ root_dir = Path(sys.argv[1])
 rnn_hash = sys.argv[2]
 dset_hash = sys.argv[3]
 n_dims = sys.argv[4]
-output_fmt = Path(sys.argv[5])
+output_fmt = sys.argv[5]
 
 if n_dims == "pcs":
     n_dims = -1
@@ -95,15 +95,13 @@ task_dataset = dill.load(open(dset_path, "rb"))
 
 # ------ Compute RNN responses
 
-rnn_hash = timehash(unique_within=root_dir, ext=".pt")
-rnn_path = root_dir / output_fmt.format(hash=rnn_hash)
-
 activity_datasets = evaluate_multiblock_activity(
     final_rnn,
     n_dim=n_dims,
     apply_pca=apply_pca,
     pca_set="train",
-    **task_dataset,
+    train = task_dataset["train"],
+    test = task_dataset["test"],
 )
 
 # ------ Save out simulated trajectories
@@ -119,7 +117,7 @@ dill.dump(
         "dataset_hash": dset_hash,
         "repo_status": rnns.gitinfo(__file__),
     },
-    open(dset_path, "wb"),
+    open(act_path, "wb"),
 )
 print("Saved activity dataset to:")
-print(dset_path)
+print(act_path)
