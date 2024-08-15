@@ -101,7 +101,7 @@ class LowRankLinear(nn.Module):
                 v = scipy.stats.ortho_group.rvs(self.n_in, random_state=seed)
                 self.v.set_(th.tensor(v[:, :self.rank], dtype=th.float32))
                 if self.rank == 1:
-                    W = th.tensor([[1.]], dtype=th.float32)
+                    W = np.array([[1.]])
                 else:
                     W = scipy.stats.ortho_group.rvs(self.rank, random_state=seed+1)
                 u = v[:, :self.rank] @ W
