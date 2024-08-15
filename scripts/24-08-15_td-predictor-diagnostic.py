@@ -1,5 +1,3 @@
-
-
 """
 Diagnostic plots for block-style driscoll tasks from `td-predict.py`.
 
@@ -24,7 +22,7 @@ from dynrn.predictors import (
     fit_dsn,
     td_loss,
     MultiBlockActivityDataset,
-    plot_block_error_examples
+    plot_block_error_examples,
 )
 import dynrn.basic_rnns as rnns
 from dynrn.basic_rnns import timehash, find_hash, hash_or_path
@@ -77,8 +75,8 @@ task_data_hash = traindata["act_hash"]
 task_data = dill.load(open(find_hash(root_dir, task_data_hash, ".dil"), "rb"))
 
 test_data: MultiBlockActivityDataset = task_data["test"]
-cumulant_fn = traindata['cumulant_fn']
-gamma = traindata['gamma']
+cumulant_fn = traindata["cumulant_fn"]
+gamma = traindata["gamma"]
 n_ex_session = 1
 
 # -------- Evalutate loss / predictions on test data
@@ -108,9 +106,14 @@ if net_filename.endswith(".pt"):
 output_dir = output_dir / net_filename
 output_dir.mkdir(parents=True, exist_ok=True)
 
-print("test_losses", test_losses.keys())
 finalize_kw = dict(path=output_dir, transparent=True)
 plotter.finalize(plot_loss(test_losses, traindata), f"loss_{dsn_hash}", **finalize_kw)
-plotter.finalize(plot_blockwise_loss(test_data, test_losses), f"blockloss_{dsn_hash}", **finalize_kw)
-plotter.finalize(plot_block_error_examples(test_data, cumul_gt, test_losses, test_preds), f"ex_{dsn_hash}", **finalize_kw)
-
+plotter.finalize(
+    plot_blockwise_loss(test_data, test_losses), f"blockloss_{dsn_hash}", **finalize_kw
+)
+plotter.finalize(
+    plot_block_error_examples(test_data, cumul_gt, test_losses, test_preds, gs_kw={"wspace": 1.5}),
+    f"ex_{dsn_hash}",
+    tight=False,
+    **finalize_kw,
+)

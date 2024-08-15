@@ -586,7 +586,7 @@ def create_predictor_network(net_type, net_args, n_act):
 
 
 def plot_block_error_examples(
-    test_data, cumul_gt, test_losses, test_preds, n_unit=2, session=0
+    test_data, cumul_gt, test_losses, test_preds, n_unit=2, session=0, gs_kw = {}
 ):
     """
     Parameters
@@ -598,15 +598,31 @@ def plot_block_error_examples(
     n_blocks = len(test_data["block_slices"])
     block_data = DriscollTasks.split_dataset(test_data)
 
-    bigfig, figs, _ = vu.flat_subfig_grid(n_blocks, 5, (4, (n_unit + 1) * 0.75))
+    _max_nax = max(
+        len(_task.stim_groups) + len(_task.tgt_groups)
+        for _task in [block_data[i]["task"] for i in range(n_blocks)]
+    )
+    bigfig, figs, _ = vu.flat_subfig_grid(
+        n_blocks, 5, (4, (_max_nax + n_unit + 1) * 0.75), **gs_kw
+    )
     for ibl in range(n_blocks):
         fig = figs[ibl]
         task: DriscollTasks.DriscollTask = block_data[ibl]["task"]
         block: DriscollTasks.SingleTaskDataset = block_data[ibl]
         steps = np.array(sorted(list(test_preds.keys())))
         plot_step = steps[-1]
-        _, ax, _ = vu.flat_grid((n_unit + 1), 1, ax_size=None, fig=fig, sharex=True)
+        nax = len(task.stim_groups) + len(task.tgt_groups)
+        _, all_ax, _ = vu.flat_grid(
+            (n_unit + 1 + _max_nax), 1, ax_size=None, fig=fig, sharex=True
+        )
+        for a in all_ax[n_unit + 1 + nax :]:
+            a.set_axis_off()
 
+        DriscollTasks.plot_session(block, session=session, ax=all_ax[:nax], legend=True)
+        taskname = task.short_name if hasattr(task, "short_name") else task.__name__
+        all_ax[0].set_title(f"{ibl} {taskname}")
+
+        ax = all_ax[nax : n_unit + 1 + nax]
         DriscollTasks.plot_session(
             task, periods=block["periods"], session=session, ax=ax
         )
