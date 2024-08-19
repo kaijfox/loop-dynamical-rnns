@@ -199,6 +199,7 @@ class itiexp(rvc):
     def __init__(self, halflife, tmin):
         super().__init__()
         self.exp = scipy.stats.expon(scale=halflife / np.log(2))
+        self.scale=halflife
         self.tmin = tmin
 
     def _pdf(self, x, *a, **kw):
@@ -206,6 +207,9 @@ class itiexp(rvc):
 
     def _rvs(self, *a, **kw):
         return self.exp.rvs(*a, **kw) + self.tmin
+    
+    def __repr__(self):
+        return f"itiexp(min={self.tmin}, scale={self.scale})"
 
 
 
@@ -248,6 +252,7 @@ driscoll_two_angle = {
     "angle2_norm_noise": driscoll_one_angle["angle_norm_noise"],
 }
 
+
 def _driscoll_invert_target(self, params, trial_info):
     stim, tgt = self._generate(params, trial_info)
     tgt[-1] = -tgt[-1]
@@ -259,7 +264,8 @@ def _driscoll_reverse_target(self, params, trial_info):
     tgt[-1] = tgt[-1, ::-1]
     return DriscollTasks.expand_periods(trial_info, stim, tgt)
 
-def _dict_subset(d, keys, new_key = lambda k: k):
+
+def _dict_subset(d, keys, new_key=lambda k: k):
     return {new_key(k): d[k] for k in keys}
 
 
@@ -734,8 +740,8 @@ class DriscollTasks:
         it co si me re
         """
 
-        name = 'MemoryPro'
-        short_name = 'mpro'
+        name = "MemoryPro"
+        short_name = "mpro"
         n_stim = 4
         n_tgt = 2
         n_period = 5
@@ -784,8 +790,8 @@ class DriscollTasks:
         it co si re
         """
 
-        name = 'DelayPro'
-        short_name = 'dpro'
+        name = "DelayPro"
+        short_name = "dpro"
         n_period = 4
         periods = ["iti", "context", "stim", "response"]
         default_params = {
@@ -814,8 +820,8 @@ class DriscollTasks:
         it co re
         """
 
-        name = 'ReactPro'
-        short_name = 'rpro'
+        name = "ReactPro"
+        short_name = "rpro"
         n_period = 3
         periods = ["iti", "context", "response"]
         default_params = {
@@ -834,23 +840,23 @@ class DriscollTasks:
             return stim, tgt
 
     class MemoryAnti(MemoryPro):
-        name = 'MemoryAnti'
-        short_name = 'manti'
+        name = "MemoryAnti"
+        short_name = "manti"
         generate = classmethod(_driscoll_invert_target)
 
     class DelayAnti(DelayPro):
-        name = 'DelayAnti'
-        short_name = 'danti'
+        name = "DelayAnti"
+        short_name = "danti"
         generate = classmethod(_driscoll_invert_target)
 
     class MemoryRev(MemoryPro):
-        name = 'MemoryRev'
-        short_name = 'mrev'
+        name = "MemoryRev"
+        short_name = "mrev"
         generate = classmethod(_driscoll_reverse_target)
 
     class DelayRev(DelayPro):
-        name = 'DelayRev'
-        short_name = 'drev'
+        name = "DelayRev"
+        short_name = "drev"
         generate = classmethod(_driscoll_reverse_target)
 
     class DecisionPro(MemoryPro):
@@ -865,8 +871,8 @@ class DriscollTasks:
         0  1  2  3  4  5  6
         """
 
-        name = 'DecisionPro'
-        short_name = 'depro'
+        name = "DecisionPro"
+        short_name = "depro"
         n_period = 7
         periods = ["iti", "context", "stim1", "memory1", "stim2", "memory2", "response"]
         angles = ["angle1", "angle2"]
@@ -879,28 +885,28 @@ class DriscollTasks:
         def _generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
             stim = np.zeros((self.n_period, self.n_stim))
             tgt = np.zeros((self.n_period, self.n_tgt))
-            stm1 = self.periods.index('stm1')
-            stm2 = self.periods.index('stm2')
-            self.n_period = list(range(1, self.n_period-1))
-            stim[self.n_period, 0] = 1 # fixation flag in all periods but iti and last
-            stim[self.n_period - 1, 1] = 1 # response flag in last period
-            stim[stm1, [2, 3]] = trial_info["noisy_points"]["angle1"] # angle1 in stim1
-            stim[stm2, [2, 3]] = trial_info["noisy_points"]["angle2"] # angle2 in stim2
+            stm1 = self.periods.index("stm1")
+            stm2 = self.periods.index("stm2")
+            self.n_period = list(range(1, self.n_period - 1))
+            stim[self.n_period, 0] = 1  # fixation flag in all periods but iti and last
+            stim[self.n_period - 1, 1] = 1  # response flag in last period
+            stim[stm1, [2, 3]] = trial_info["noisy_points"]["angle1"]  # angle1 in stim1
+            stim[stm2, [2, 3]] = trial_info["noisy_points"]["angle2"]  # angle2 in stim2
             directions = [trial_info["directions"][a] for a in self.angles]
             first_angle = trial_info["norms"]["angle1"] > trial_info["norms"]["angle2"]
             return stim, tgt, (first_angle, directions)
-        
+
         @classmethod
         def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
             stim, tgt, (first_angle, directions) = self._generate(params, trial_info)
             tgt[-1] = directions[0] if first_angle else directions[1]
             return DriscollTasks.expand_periods(trial_info, stim, tgt)
-    
+
     class DecisonAnti(DecisionPro):
         """DecisionPro, responding to the smaller amplitude stimulus."""
 
-        name = 'DecisionAnti'
-        short_name = 'deanti'
+        name = "DecisionAnti"
+        short_name = "deanti"
 
         @classmethod
         def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
@@ -911,36 +917,36 @@ class DriscollTasks:
     class OcclusionPro(DecisionPro):
         """DecisionPro with response to larger axis of larger-amplitude
         stimulus."""
-        
-        name = 'OcclusionPro'
-        short_name = 'opro'
+
+        name = "OcclusionPro"
+        short_name = "opro"
 
         @classmethod
         def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
             stim, tgt, (first_angle, directions) = self._generate(params, trial_info)
             tgt[-1] = directions[0] if first_angle else directions[1]
             first_larger = tgt[-1, 0] > tgt[-1, 1]
-            stim[6, 1 if first_larger else 0] = 0 # remove the smaller axis
+            stim[6, 1 if first_larger else 0] = 0  # remove the smaller axis
             return DriscollTasks.expand_periods(trial_info, stim, tgt)
 
     class OcclusionAnti(OcclusionPro):
         """OcclusionPro with response to smaller axis of larger-amplitude
         stimulus."""
 
-        name = 'OcclusionAnti'
-        short_name = 'oanti'
+        name = "OcclusionAnti"
+        short_name = "oanti"
 
         @classmethod
         def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
             stim, tgt, (first_angle, directions) = self._generate(params, trial_info)
             tgt[-1] = directions[0] if first_angle else directions[1]
             first_larger = tgt[-1, 0] > tgt[-1, 1]
-            stim[6, 0 if first_larger else 1] = 0 # remove the larger axis
+            stim[6, 0 if first_larger else 1] = 0  # remove the larger axis
             return DriscollTasks.expand_periods(trial_info, stim, tgt)
-        
+
     class DecisionReactPro(DecisionPro):
         """DecisionPro with no context or memory periods.
-        
+
         .  o  o  .  fixation
         .  .  .  o  response
         .  .  o  o  x y (stim)
@@ -948,8 +954,9 @@ class DriscollTasks:
         it co s1 s2
         0  1  2  4
         """
-        name = 'DecisionReactPro'
-        short_name = 'drpro'
+
+        name = "DecisionReactPro"
+        short_name = "drpro"
         n_period = 4
         periods = ["iti", "context", "stim1", "stim2"]
         default_params = {
@@ -959,8 +966,9 @@ class DriscollTasks:
 
     class DecisionReactAnti(DecisonAnti):
         """DecisionAnti with no context or memory periods."""
-        name = 'DecisionReactAnti'
-        short_name = 'dranti'
+
+        name = "DecisionReactAnti"
+        short_name = "dranti"
         n_period = 4
         periods = ["iti", "context", "stim1", "stim2"]
         default_params = {
@@ -979,8 +987,8 @@ class DriscollTasks:
         it co re
         """
 
-        name = 'ResponsePro'
-        short_name = 'resppro'
+        name = "ResponsePro"
+        short_name = "resppro"
         n_period = 3
         periods = ["iti", "context", "response"]
         angles = []
@@ -1014,21 +1022,6 @@ class DriscollTasks:
         def generate(self, params: dict, trial_info: "DriscollTasks.TrialInfo"):
             stim, tgt = self._generate(params, trial_info)
             return DriscollTasks.expand_periods(trial_info, stim, tgt)
-
-
-        
-
-    
-
-    
-
-
-
-
-
-    
-    
-    
 
     @staticmethod
     def plot_session(
@@ -1574,6 +1567,96 @@ def split_trials(data, periods, start_period=0, window=False):
     return trials
 
 
+def split_trials_driscoll(data, dataset: DriscollTasks.SingleTaskDataset, window=False):
+    """
+    Parameters
+    ----------
+    data : np.ndarray, shape (sessions, time, features...) or dict of arrays
+        The data to slice. If a dictionary, may not contain the key 'period'.
+    dataset : DriscollTasks.SingleTaskDataset
+        The dataset containing the task and trial info.
+    window : int or False
+        The window of data present in `data`. If False, do not return windowed
+        data. (False not yet tested/implemented.)
+
+    Returns
+    -------
+    trials : dict[Any, list[list[array]]]
+        A dictionary mapping each key in `data` to a list of arrays, each
+        containing the data for a trial: a list of period data arrays of shape
+        (time, features).
+
+    """
+    if not isinstance(data, dict):
+        data = {"data": data}
+
+    # if `window` is falsy do not return windows
+    get_window = window is not False
+    window = window if get_window else 0
+
+    # final indexing: (k)[trial, prd_in_trial, window_around_prd][time, feat..]
+
+    # separate data into periodwise arrays
+    # (k)[session][trial x period_in_trial][step_in_period][...]
+    starts = [
+        np.cumsum(np.concatenate([tmeta["durations"] for tmeta in t]))
+        for t in dataset["trials"]
+    ]
+    periods = {
+        k: [
+            np.array(np.array_split(d[i_sess], sess_starts)[:-1], dtype=object)
+            for i_sess, sess_starts in enumerate(starts)
+        ]
+        for k, d in data.items()
+    }
+
+    # add period index
+    periods["period"] = [
+        np.tile(np.arange(dataset["task"].n_period), len(t)) for t in dataset["trials"]
+    ]
+
+    # create windows across periods
+    windowed = {
+        k: [
+            np.lib.stride_tricks.sliding_window_view(sess_v, 2 * window + 1, axis=0)
+            for sess_v in v
+        ]
+        for k, v in periods.items()
+    }
+    # add back empty data for windows at the edges
+    pads = {
+        k: [np.array([None] * (window * (2 * window + 1)), dtype=object).reshape(window, -1)
+            for sess_v in v]
+        for k, v in windowed.items()
+    }
+    windowed = {
+        k: [
+            np.concatenate(
+                [
+                    pad,
+                    sess_v,
+                    pad,
+                ],
+                axis=0,
+            )
+            for sess_v, pad in zip(v, pads[k])
+        ]
+        for k, v in windowed.items()
+    }
+    # split by trial
+    trials = {
+        k: np.concatenate([
+            sess_v.reshape(
+                (-1, dataset["task"].n_period,) + sess_v.shape[1:]
+            )
+            for sess_v in v
+        ])
+        for k, v in windowed.items()
+    }
+
+    return trials
+
+
 def extract_trial_data(
     f,
     trials,
@@ -1583,6 +1666,7 @@ def extract_trial_data(
     cmap=None,
     color_range=(0, 2 * np.pi),
     n_clusters=None,
+    source="driscoll",
 ):
     """
 
@@ -1607,12 +1691,18 @@ def extract_trial_data(
     n_clusters : int
         The number of clusters to sort the data into. If None, do return a
         partition of the trials.
-
+    source : str
+        The source of the data. If "driscoll", then the data is assumed to be
+        in the format output by `split_trials_driscoll`, otherwise it is assumed
+        to be in the format output by `split_trials`.
     """
-    if window is not None:
-        trial_angles = np.array([f(t[data_key][period_i][window]) for t in trials])
+    if source == "driscoll":
+        trial_angles = np.array([f(t[period_i, window]) for t in trials[data_key]])
     else:
-        trial_angles = np.array([f(t[data_key][period_i]) for t in trials])
+        if window is not None:
+            trial_angles = np.array([f(t[data_key][period_i][window]) for t in trials])
+        else:
+            trial_angles = np.array([f(t[data_key][period_i]) for t in trials])
     ret = (trial_angles,)
 
     if cmap is not None:
@@ -1640,6 +1730,13 @@ def nanstack(x, axis=0):
     if np.array(x[0]).ndim == 0:
         return np.array(x)
     x = [np.array(t) for t in x]
+ 
+    # allow passing of some Nones insead of arrays
+    shape = next((t.shape for t in x if t.ndim > 0), None)
+    if shape is None:
+        raise ValueError("must pass at least one non-scalar array")
+    x = [(t if t.ndim > 0 else np.full(shape[:axis] + (0,) + shape[axis + 1:], np.nan)) for t in x]
+
 
     max_len = max(t.shape[axis] for t in x)
     x = [
@@ -1679,14 +1776,14 @@ def apply_to_trial_groups(f, trials, groups, as_array=False):
 
     """
     ret = []
-    window = len(trials[0]["period"][0])
+    window = len(trials["period"][0][0])
 
     for group in groups:
 
         # check each has same period structure
-        n_period = len(trials[group[0]]["period"])
+        n_period = len(trials["period"][group[0]])
         assert all(
-            len(trials[i]["period"]) == n_period for i in group
+            len(trials["period"][i]) == n_period for i in group
         ), "All trials in group must have the same period structure"
 
         if as_array:
@@ -1694,23 +1791,23 @@ def apply_to_trial_groups(f, trials, groups, as_array=False):
         else:
             stackfn = lambda x: x
 
-        # trials[i_trial]["data_key"][i_period][i_window][time, ...]
-        # data["data_key"][i_period][i_window][i_trial (in group), time, ...]
+        # trials["data_key"][i_trial, i_period, i_window][time, ...]
+        # data["data_key"][i_period, i_window][i_trial (in group), time, ...]
         # or if not as_array
-        # data["data_key"][i_period][i_window][i_trial (in group)][time, ...]
+        # data["data_key"][i_period, i_window][i_trial (in group)][time, ...]
         # then apply f:
-        # data["data_key"][i_period][i_window][...f_return_shape...]
-        data = {k: [] for k in trials[0]}
+        # data["data_key"][i_period, i_window][...f_return_shape...]
+        data = {k: [] for k in trials}
         for k in data:
             # if this is trial metadata (no iteration over periods) then skip it
-            if not hasattr(trials[0][k], "__getitem__") or not hasattr(
-                trials[0][k][0], "__getitem__"
+            if not hasattr(trials[k][0], "__getitem__") or not hasattr(
+                trials[k][0, 0], "__getitem__"
             ):
                 continue
             for j in range(n_period):
                 data[k].append([])
                 for l in range(window):
-                    data[k][j].append(f(stackfn([trials[i][k][j][l] for i in group])))
+                    data[k][j].append(f(stackfn([trials[k][i, j, l] for i in group])))
 
         ret.append(data)
     return ret

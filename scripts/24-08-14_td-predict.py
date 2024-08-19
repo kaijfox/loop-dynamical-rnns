@@ -13,7 +13,8 @@ dset_hash: str
     Hash of the dataset to use.
 output_fmt: str
     Format string for the output path, relative to the root directory. Should
-    contain a `{hash}` substring to insert the hash of the saved model.
+    contain a `{hash}` substring to insert the hash of the saved model, and have
+    no extension.
 gamma: float
     Discount factor for the discounted sum.
 network_type: str
