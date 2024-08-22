@@ -5,7 +5,7 @@ import numpy as np
 import copy
 import dill
 from collections import namedtuple
-from .rnntasks import DriscollTasks, DriscollPlots
+from .rnntasks import DriscollTasks, DriscollPlots, split_trials, split_trials_driscoll
 from .basic_rnns import plot_rnn_training
 from sklearn.decomposition import PCA
 import tqdm
@@ -581,7 +581,7 @@ def create_predictor_network(net_type, net_args, n_act):
             nn.Linear(widths[1], n_act),
         )
 
-    elif net_type == 'linear':
+    elif net_type == "linear":
         net_args = {**dict(width=-1), **net_args}
         if net_args["width"] < 0:
             raise ValueError(f"`width` network argument required")
@@ -598,7 +598,7 @@ def create_predictor_network(net_type, net_args, n_act):
 
 
 def plot_block_error_examples(
-    test_data, cumul_gt, test_losses, test_preds, n_unit=2, session=0, gs_kw = {}
+    test_data, cumul_gt, test_losses, test_preds, n_unit=2, session=0, gs_kw={}
 ):
     """
     Parameters
@@ -663,3 +663,78 @@ def plot_block_error_examples(
             )
 
     return bigfig
+
+
+# shorthand for pca.transform on high-dim array
+_pct = lambda pca, x: pca.transform(x.reshape(-1, x.shape[-1])).reshape(
+    x.shape[:-1] + (pca.n_components_,)
+)
+
+
+def periodwise_pca(periods, gt, *alt, n_dim = 3):
+    """
+    Parameters
+    ----------
+    periods : np.ndarray, shape (n_sessions, session_length)
+        Period indices for each timepoint
+    gt : np.ndarray, shape (n_sessions, session_length, n_act)
+        Ground truth activity used to fit PCAs
+    alt : tuple of ndarray, shape (n_sessions, session_length, n_act)
+        Optional additional activity arrays to project onto the PCAs
+    n_dim : int, default 3
+        Number of principal components to fit
+
+    Returns
+    -------
+    period_cumul_pca : list of PCA
+        A PCA object for each period
+    pc_gt : np.ndarray, shape (n_sessions, session_length, n_dim, n_period)
+        The ground truth activity projected onto the PCAs fit to each period
+    pc_alt : list of np.ndarray, shaped as `pc_gt`
+        The additional activity arrays projected onto the PCAs fit to each
+        period.
+    fpc_gt : np.ndarray, shape (n_sessions, session_length, n_dim)
+        The ground truth activity projected onto the full-data PCA
+    fpc_alt : list of np.ndarray, shaped as `fpc_gt`
+        The additional activity arrays projected onto the full-data PCA
+    """
+
+    # list of trials, where each trial is dict of lists of arrays
+    # ex: trials[0]['period'] = [[4, 0, 1], [0, 1, 2], ..., [3, 4, 0]]
+    # and trials[0]['gt'] has same list strucutre, but with period indices
+    # replaced by `cumulpc_gt` data from the corresponding period
+    trials_fulldim = split_trials(
+        {"gt": gt},
+        periods.astype("int")[:, 1:],
+    )
+    trials_fulldim = list(
+        filter(  # filter out end-of-session ITI
+            (lambda t: len(t["period"]) >= 5), trials_fulldim
+        )
+    )
+    # fit pca for activity during each period for visualization
+    _npr = periods.astype('int').max() + 1
+    period_gt = [
+        np.concatenate([t["gt"][i] for t in trials_fulldim]) for i in range(_npr)
+    ]
+    period_pca = [PCA(n_components=n_dim).fit(h) for h in period_gt]
+    full_pca = PCA(n_components=n_dim).fit(gt.reshape(-1, gt.shape[-1]))
+
+    # gt and predicted cumulants and predicted future sum, projected onto each PC axis
+    # shape: (n_sessions, session_length, 2, n_period)
+    pc_gt = np.stack(
+        [_pct(pca, gt) for pca in period_pca],
+        axis=-1,
+    )
+    pc_alt = [
+        np.stack(
+            [_pct(pca, a) for pca in period_pca],
+            axis=-1,
+        )
+        for a in alt
+    ]
+
+    fpc_gt = _pct(full_pca, gt)
+    fpc_alt = [_pct(full_pca, a) for a in pc_alt]
+
+    return period_pca, pc_gt, pc_alt, fpc_gt, fpc_alt
