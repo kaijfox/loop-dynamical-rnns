@@ -527,6 +527,8 @@ def create_predictor_network(net_type, net_args, n_act):
         normalization, and an initial linear bottleneck.
         - widths, list of two ints: the number of hidden units in nonlinear layer
         - bottleneck, int: the number of units in the bottleneck layer
+    - 'linear': a linear network with no activation function
+        - width, int: the number of hidden units
 
     Parameters
     ----------
@@ -577,6 +579,16 @@ def create_predictor_network(net_type, net_args, n_act):
             nn.Linear(widths[0], widths[1]),
             nn.Softplus(),
             nn.Linear(widths[1], n_act),
+        )
+
+    elif net_type == 'linear':
+        net_args = {**dict(width=-1), **net_args}
+        if net_args["width"] < 0:
+            raise ValueError(f"`width` network argument required")
+        create_model = lambda: nn.Sequential(
+            nn.Linear(n_act, net_args["width"]),
+            nn.LayerNorm(net_args["width"]),
+            nn.Linear(net_args["width"], n_act),
         )
 
     else:
