@@ -1,11 +1,12 @@
 import numpy as np
 from matplotlib.collections import LineCollection
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from cmap import Colormap
 import matplotlib.pyplot as plt
 
 
 def trajecories(
-    ax, x, colors, color="time", set_lim=True, time_point=None, point_kws={}, **kws
+    ax, x, colors, color="time", set_lim=True, time_point=None, point_kws={}, clean_style=True, **kws
 ):
     """
     Plot array of trajecories colored by time
@@ -45,10 +46,11 @@ def trajecories(
     colors = np.array(colors)
 
     n_traj = x.shape[0]
+    ndim = x.shape[-1]
     sliding = (
         np.lib.stride_tricks.sliding_window_view(x, 3, axis=1)
         .transpose(0, 1, 3, 2)
-        .reshape(-1, 3, 2)
+        .reshape(-1, 3, ndim)
     )
     cdim = colors.shape[-1]
     if color == "time":
@@ -73,17 +75,34 @@ def trajecories(
         # c.shape = (n_traj, x.n_time - 2, 3/4)
         c = colors[:, 1:-1]
     c_flat = c.reshape(-1, cdim)
-    ax.add_artist(LineCollection(sliding, colors=c_flat, **kws))
+    if ndim == 2:
+        ax.add_artist(LineCollection(sliding, colors=c_flat, **kws))
+    else:
+        ax.add_artist(Line3DCollection(sliding, colors=c_flat, **kws))
+        
 
     if time_point is not None:
         ax.scatter(x[:, time_point], **{"c": c[:, time_point], **point_kws})
 
     if set_lim:
-        ax.set_aspect(1.0)
-        xmin, xmax = np.nanmin(x[..., 0]), np.nanmax(x[..., 0])
-        ymin, ymax = np.nanmin(x[..., 1]), np.nanmax(x[..., 1])
-        ax.plot([xmin, xmax], [ymin, ymax], alpha=0)
-
+        if ndim == 2:
+            ax.set_aspect(1.0)
+            xmin, xmax = np.nanmin(x[..., 0]), np.nanmax(x[..., 0])
+            ymin, ymax = np.nanmin(x[..., 1]), np.nanmax(x[..., 1])
+            ax.plot([xmin, xmax], [ymin, ymax], alpha=0)
+        if ndim == 3:
+            xmin, xmax = np.nanmin(x[..., 0]), np.nanmax(x[..., 0])
+            ymin, ymax = np.nanmin(x[..., 1]), np.nanmax(x[..., 1])
+            zmin, zmax = np.nanmin(x[..., 2]), np.nanmax(x[..., 2])
+            ax.set_box_aspect([xmax - xmin, ymax - ymin, zmax - zmin])
+            ax.plot([xmin, xmax], [ymin, ymax], [zmin, zmax], alpha=0)
+    
+    if clean_style and ndim == 3:
+        # Remove gridlines and panel coloring
+        ax.grid(False)
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
 
 def vectorfield_2d(ax, x, y, u, v, color=None, cmap=None, **kws):
     """
