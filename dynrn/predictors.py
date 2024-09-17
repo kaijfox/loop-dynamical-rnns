@@ -591,6 +591,16 @@ def create_predictor_network(net_type, net_args, n_act):
             nn.Linear(net_args["width"], n_act),
         )
 
+    elif net_type == "fully-linear":
+        net_args = {**dict(width=-1), **net_args}
+        if net_args["width"] < 0:
+            raise ValueError(f"`width` network argument required")
+        create_model = lambda: nn.Sequential(
+            nn.Linear(n_act, net_args["width"]),
+            nn.Linear(net_args["width"], n_act),
+        )
+
+
     else:
         raise ValueError(f"Invalid network type: {net_type}")
 
